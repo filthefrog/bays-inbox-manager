@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Solo POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -10,135 +9,82 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing fields' });
   }
 
-  const KNOWLEDGE_BASE = {
-    name: "BAYS",
-    address: "Via Papa Giovanni XXIII, 106, Civitanova Marche (MC)",
-    type: "Affittacamere",
-    rooms: 2,
-    beds: 4,
-    bathrooms: 2,
-    sqm: 75,
-    priceHigh: "€150/notte",
-    priceLow: "€80/notte",
-    discount7nights: "-15%",
-    discount30nights: "-30%",
-    beach: "1,6 km",
-    parking: "Garage privato incluso",
-    wifi: "Fibra ottica 100 Mbps",
-    checkin: "Qualsiasi ora (self check-in digitale)",
-    checkout: "Entro le 11:00",
-    cancellation: "Entro 14 giorni: rimborso totale. 7-14 giorni: 50%. Entro 7: nessun rimborso",
-    noBreakfast: "No colazione (affittacamere autonomo)",
-    contactEmail: "info@baysvilla.it",
-    contactPhone: "+39 375 XXXXXX"
-  };
-
-  const categories = ["Lamentela", "Prenotazione", "Problema tecnico", "Fatturazione", "Richiesta informazioni", "Complimento", "Cancellazione"];
-  const tones = ["Cortese", "Neutro", "Urgente", "Arrabbiato"];
-
   try {
-    // Step 1: Categorizzazione con risposta JSON
-    const categoryPrompt = `Analizza questa email e categorizzala.
+    // Step 1: Categorize + Generate responses in one call
+    const fullPrompt = `You are Filippo, manager of BAYS guesthouse in Civitanova Marche.
 
-Email:
+KNOWLEDGE:
+- Address: Via Papa Giovanni XXIII, 106, Civitanova Marche (MC)
+- Type: Guesthouse (affittacamere)
+- 2 rooms, 4 beds, 75 sqm
+- Price: €80-150/night depending on season
+- Parking included
+- WiFi fiber 100 Mbps
+- No breakfast (self-catering)
+
+TONE: Warm, responsible, professional, humane. Protect the business 100%. Acknowledge client problems but don't make impossible promises. Fast responses, concrete solutions.
+
+INCOMING EMAIL:
 From: ${from}
 Subject: ${subject}
 Body: ${body}
 
-Rispondi SOLO con un JSON valido (niente altro):
+TASK:
+1. Categorize into ONE: Complaint, Booking, Technical Issue, Billing, Information Request, Compliment, Cancellation
+2. Identify tone: Polite, Neutral, Urgent, Angry
+3. Generate 3 different email responses
+
+RESPOND WITH ONLY THIS JSON (nothing else):
 {
-  "category": "una tra: Lamentela, Prenotazione, Problema tecnico, Fatturazione, Richiesta informazioni, Complimento, Cancellazione",
-  "tone": "una tra: Cortese, Neutro, Urgente, Arrabbiato"
+  "category": "category name",
+  "tone": "tone name",
+  "response1": "first email response here",
+  "response2": "second email response here",
+  "response3": "third email response here"
 }`;
 
-    const categoryResponse = await callClaude(apiKey, categoryPrompt);
-    
-    let category = "Richiesta informazioni";
-    let tone = "Neutro";
-    
-    try {
-      const jsonMatch = categoryResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (categories.includes(parsed.category)) category = parsed.category;
-        if (tones.includes(parsed.tone)) tone = parsed.tone;
-      }
-    } catch (e) {
-      // Se il JSON non è valido, usa i defaults
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-opus-5",
+        max_tokens: 3000,
+        messages: [{ role: "user", content: fullPrompt }]
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || "API Error");
     }
 
-    // Step 2: Generazione risposte
-    const responsePrompt = `Sei Filippo, gestore di BAYS (affittacamere a Civitanova Marche).
+    const data = await response.json();
+    const responseText = data.content[0].text;
 
-KNOWLEDGE BASE:
-${JSON.stringify(KNOWLEDGE_BASE, null, 2)}
-
-TONE DI VOICE: Caldo, responsabile, professionale, umano. Proteggo l'azienda al 100% senza scuse. Riconosco i problemi del cliente ma non faccio promesse impossibili. Veloce nella formulazione, soluzioni concrete.
-
-Email ricevuta:
-From: ${from}
-Subject: ${subject}
-Body: ${body}
-
-Categoria: ${category}
-Tone cliente: ${tone}
-
-Genera 3 risposte email perfette, ognuna leggermente diversa nello stile ma tutte certificate, professionali e coerenti col tone di BAYS. 
-
-Formato risposta:
----RISPOSTA 1---
-[testo della risposta]
----RISPOSTA 2---
-[testo della risposta]
----RISPOSTA 3---
-[testo della risposta]`;
-
-    const responsesText = await callClaude(apiKey, responsePrompt);
-    
-    const respMatches = responsesText.split(/---RISPOSTA \d+---/);
-    const responses = respMatches
-      .slice(1, 4)
-      .map(r => r.trim())
-      .filter(r => r.length > 0);
-
-    if (responses.length < 3) {
-      responses.push("Risposta non generata correttamente");
+    // Parse JSON response
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Invalid response format");
     }
+
+    const parsed = JSON.parse(jsonMatch[0]);
 
     return res.status(200).json({
-      category,
-      tone,
-      responses: responses.slice(0, 3)
+      category: parsed.category || "Information Request",
+      tone: parsed.tone || "Neutral",
+      responses: [
+        parsed.response1 || "Unable to generate response",
+        parsed.response2 || "Unable to generate response",
+        parsed.response3 || "Unable to generate response"
+      ]
     });
 
   } catch (error) {
     console.error('Error:', error);
     return res.status(500).json({ error: error.message });
   }
-}
-
-async function callClaude(apiKey, message) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-opus-5",
-      max_tokens: 2000,
-      messages: [
-        { role: "user", content: message }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error?.message || "API Error");
-  }
-
-  const data = await response.json();
-  return data.content[0].text;
 }
