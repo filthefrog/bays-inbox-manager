@@ -58,6 +58,38 @@
       background: #0066cc;
     }
     
+    input {
+      width: 100%;
+      padding: 12px;
+      font-size: 14px;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-family: monospace;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: #0084ff;
+      box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
+    }
+    
+    .setup-screen {
+      padding: 2rem;
+    }
+    
+    .setup-screen h2 {
+      margin-bottom: 1rem;
+      font-size: 20px;
+    }
+    
+    .setup-screen p {
+      color: #666;
+      margin-bottom: 1.5rem;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+    
     .login-screen {
       text-align: center;
       padding: 2rem;
@@ -226,6 +258,17 @@
       margin-bottom: 1rem;
     }
     
+    .secondary {
+      background: white;
+      color: #666;
+      border: 1px solid #e5e5e5;
+      margin-top: 1rem;
+    }
+    
+    .secondary:hover {
+      background: #f9f9f9;
+    }
+    
     .error {
       background: #ffebee;
       color: #c62828;
@@ -243,10 +286,6 @@
       font-weight: 600;
       margin-top: 12px;
     }
-    
-    .hidden {
-      display: none;
-    }
   </style>
 </head>
 <body>
@@ -262,7 +301,7 @@
   <script>
     class BAYSManager {
       constructor() {
-        this.view = 'loading';
+        this.view = 'init';
         this.emails = [];
         this.selectedEmailId = null;
         this.category = null;
@@ -273,6 +312,29 @@
       }
 
       async init() {
+        const saved = localStorage.getItem('claude_api_key');
+        if (saved) {
+          await this.loadEmails();
+        } else {
+          this.view = 'setup';
+        }
+        this.render();
+      }
+
+      saveApiKey() {
+        const key = document.getElementById('apiKeyInput')?.value || '';
+        if (!key) {
+          alert('Inserisci una API Key valida!');
+          return;
+        }
+        localStorage.setItem('claude_api_key', key);
+        this.loadEmails();
+      }
+
+      async loadEmails() {
+        this.view = 'loading';
+        this.render();
+        
         try {
           const response = await fetch('/api/emails');
           if (!response.ok) {
@@ -311,20 +373,9 @@
         const email = this.emails.find(e => e.id === this.selectedEmailId);
         if (!email) return;
 
-        try {
-          let apiKey = localStorage.getItem('claude_api_key');
-          
-          if (!apiKey) {
-            apiKey = prompt("Inserisci la tua Claude API Key (sk-ant-v0-...):") || '';
-            if (!apiKey) {
-              this.error = "API Key richiesta";
-              this.view = 'dashboard';
-              this.render();
-              return;
-            }
-            localStorage.setItem('claude_api_key', apiKey);
-          }
+        const apiKey = localStorage.getItem('claude_api_key');
 
+        try {
           const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -381,13 +432,32 @@
         this.render();
       }
 
+      changeApiKey() {
+        localStorage.removeItem('claude_api_key');
+        this.view = 'setup';
+        this.render();
+      }
+
+      renderSetup() {
+        return `
+          <div class="setup-screen">
+            <h2>🔑 Configura Claude API</h2>
+            <p>
+              Inserisci la tua Claude API Key per iniziare.<br>
+              La key viene salvata solo nel tuo browser.
+            </p>
+            <input type="password" id="apiKeyInput" placeholder="sk-ant-v0-..." />
+            <button onclick="app.saveApiKey()">Salva e continua</button>
+          </div>
+        `;
+      }
+
       renderLogin() {
         return `
           <div class="login-screen">
             <h2>🔐 Accedi a Gmail</h2>
             <p>
-              Clicca il bottone sotto per autorizzare BAYS Inbox Manager a leggere le tue email.<br>
-              Non condivideremo mai i tuoi dati.
+              Clicca il bottone sotto per autorizzare BAYS Inbox Manager a leggere le tue email.
             </p>
             <button onclick="app.loginWithGmail()">
               📧 Accedi con Gmail
@@ -422,7 +492,12 @@
           `;
         });
 
-        html += `</div>`;
+        html += `
+          </div>
+          <button class="secondary" onclick="app.changeApiKey()" style="margin-top: 2rem;">
+            ⚙️ Cambia Claude API Key
+          </button>
+        `;
         return html;
       }
 
@@ -430,7 +505,7 @@
         return `
           <div class="loader">
             <div class="spinner"></div>
-            <p>Claude sta analizzando l'email...</p>
+            <p>Claude sta analizzando...</p>
           </div>
         `;
       }
@@ -490,7 +565,9 @@
           html = `<div class="error">⚠️ ${this.error}</div>`;
         }
 
-        if (this.view === 'loading') {
+        if (this.view === 'setup') {
+          html += this.renderSetup();
+        } else if (this.view === 'init' || this.view === 'loading') {
           html += `<div class="loader"><div class="spinner"></div><p>Caricamento...</p></div>`;
         } else if (this.view === 'login') {
           html += this.renderLogin();
