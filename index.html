@@ -1,590 +1,414 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BAYS Inbox Manager</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #f5f5f5;
-      color: #1a1a1a;
-    }
-    
-    .container {
-      max-width: 100%;
-      background: white;
-      min-height: 100vh;
-      padding: 1rem;
-    }
-    
-    .header {
-      margin-bottom: 2rem;
-      border-bottom: 1px solid #e5e5e5;
-      padding-bottom: 1rem;
-    }
-    
-    .title {
-      font-size: 24px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    
-    .subtitle {
-      font-size: 13px;
-      color: #666;
-    }
-    
-    button {
-      padding: 12px 16px;
-      font-size: 14px;
-      font-weight: 600;
-      border: none;
-      border-radius: 8px;
-      background: #0084ff;
-      color: white;
-      cursor: pointer;
-      width: 100%;
-      margin-bottom: 8px;
-    }
-    
-    button:hover {
-      background: #0066cc;
-    }
-    
-    input {
-      width: 100%;
-      padding: 12px;
-      font-size: 14px;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      font-family: monospace;
-    }
-    
-    input:focus {
-      outline: none;
-      border-color: #0084ff;
-      box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
-    }
-    
-    .setup-screen {
-      padding: 2rem;
-    }
-    
-    .setup-screen h2 {
-      margin-bottom: 1rem;
-      font-size: 20px;
-    }
-    
-    .setup-screen p {
-      color: #666;
-      margin-bottom: 1.5rem;
-      line-height: 1.6;
-      font-size: 14px;
-    }
-    
-    .login-screen {
-      text-align: center;
-      padding: 2rem;
-    }
-    
-    .login-screen h2 {
-      margin-bottom: 1rem;
-      font-size: 20px;
-    }
-    
-    .login-screen p {
-      color: #666;
-      margin-bottom: 2rem;
-      line-height: 1.6;
-    }
-    
-    .dashboard {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    
-    .email-item {
-      background: white;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      padding: 1rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .email-item:hover {
-      border-color: #0084ff;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    }
-    
-    .email-from {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    
-    .email-subject {
-      font-size: 13px;
-      color: #666;
-      margin-bottom: 8px;
-    }
-    
-    .email-preview {
-      font-size: 12px;
-      color: #999;
-      line-height: 1.5;
-      max-height: 40px;
-      overflow: hidden;
-    }
-    
-    .loader {
-      text-align: center;
-      padding: 2rem;
-    }
-    
-    .spinner {
-      border: 4px solid #f3f3f3;
-      border-top: 4px solid #0084ff;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 1rem;
-    }
-    
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-    
-    .email-detail {
-      background: #f9f9f9;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      padding: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    
-    .meta-row {
-      font-size: 13px;
-      margin-bottom: 8px;
-    }
-    
-    .meta-label {
-      font-weight: 600;
-      color: #666;
-    }
-    
-    .badge {
-      display: inline-block;
-      background: #e8f3ff;
-      color: #0084ff;
-      font-size: 11px;
-      padding: 6px 10px;
-      border-radius: 4px;
-      font-weight: 600;
-      margin-right: 8px;
-      margin-bottom: 8px;
-    }
-    
-    .response-option {
-      background: white;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      padding: 1.5rem;
-      margin-bottom: 12px;
-    }
-    
-    .response-label {
-      font-size: 12px;
-      color: #666;
-      font-weight: 600;
-      margin-bottom: 12px;
-      text-transform: uppercase;
-    }
-    
-    .response-text {
-      font-size: 13px;
-      line-height: 1.6;
-      margin-bottom: 12px;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      background: #f9f9f9;
-      padding: 12px;
-      border-radius: 4px;
-    }
-    
-    .button-group {
-      display: flex;
-      gap: 8px;
-    }
-    
-    .button-group button {
-      flex: 1;
-      margin-bottom: 0;
-    }
-    
-    .approve {
-      background: #31a24c;
-    }
-    
-    .approve:hover {
-      background: #2a8c41;
-    }
-    
-    .reject {
-      background: white;
-      color: #dc3545;
-      border: 1px solid #dc3545;
-    }
-    
-    .reject:hover {
-      background: #fff5f6;
-    }
-    
-    .back-btn {
-      background: white;
-      color: #0084ff;
-      border: 1px solid #0084ff;
-      margin-bottom: 1rem;
-    }
-    
-    .secondary {
-      background: white;
-      color: #666;
-      border: 1px solid #e5e5e5;
-      margin-top: 1rem;
-    }
-    
-    .secondary:hover {
-      background: #f9f9f9;
-    }
-    
-    .error {
-      background: #ffebee;
-      color: #c62828;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 1rem;
-    }
-    
-    .status-approved {
-      background: #e8f5e9;
-      color: #31a24c;
-      padding: 12px;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 600;
-      margin-top: 12px;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ACME</title>
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --text-secondary: #8a8a8e;
+    --accent: #007aff;
+    --green: #34c759;
+    --red: #ff3b30;
+    --orange: #ff9500;
+    --border: rgba(60,60,67,0.1);
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; min-height: 100vh; }
+
+  .topbar { padding: 8px 4px 24px; }
+  .topbar .eyebrow { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 2px; }
+  .topbar h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+
+  /* Dashboard grid - the heart */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 18px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s ease;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card:active { transform: scale(0.97); }
+  .card .icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    margin-bottom: 14px;
+  }
+  .card .name { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .card .count { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .card .count.zero { color: var(--text-secondary); }
+
+  .icon.red { background: rgba(255,59,48,0.12); }
+  .icon.blue { background: rgba(0,122,255,0.12); }
+  .icon.orange { background: rgba(255,149,0,0.12); }
+  .icon.purple { background: rgba(175,82,222,0.12); }
+  .icon.teal { background: rgba(90,200,250,0.12); }
+  .icon.green { background: rgba(52,199,89,0.12); }
+  .icon.gray { background: rgba(142,142,147,0.12); }
+
+  .refresh-row { display: flex; justify-content: space-between; align-items: center; margin: 24px 0 4px; padding: 0 4px; }
+  .refresh-row .status { font-size: 13px; color: var(--text-secondary); }
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--card); border: none;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; cursor: pointer;
+  }
+
+  /* List views */
+  .list-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .back { font-size: 17px; color: var(--accent); font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+  .list-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+
+  .email-row {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .email-row:active { transform: scale(0.98); }
+  .email-row .from { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+  .email-row .subject { font-size: 14px; color: var(--text); margin-bottom: 4px; opacity: 0.85; }
+  .email-row .preview { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .email-row .ready-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--green); font-weight: 600; margin-top: 6px; }
+
+  /* Detail view */
+  .detail-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .detail-row { font-size: 14px; margin-bottom: 6px; }
+  .detail-row .label { color: var(--text-secondary); margin-right: 6px; }
+  .pill-row { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .pill {
+    background: rgba(0,122,255,0.1); color: var(--accent);
+    font-size: 12px; font-weight: 600;
+    padding: 5px 10px; border-radius: 100px;
+  }
+  .pill.tone-urgente, .pill.tone-arrabbiato { background: rgba(255,59,48,0.1); color: var(--red); }
+
+  .section-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.02em; margin: 20px 0 10px 4px; }
+
+  .response-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .response-card .opt-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+  .response-card .body-text {
+    font-size: 14px; line-height: 1.5; white-space: pre-wrap;
+    background: var(--bg); border-radius: 10px; padding: 12px; margin-bottom: 12px;
+  }
+  .btn-row { display: flex; gap: 8px; }
+  .btn {
+    flex: 1; border: none; border-radius: 12px; padding: 11px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .btn:active { opacity: 0.7; }
+  .btn-send { background: var(--green); color: white; }
+  .btn-send.sent { background: rgba(52,199,89,0.15); color: var(--green); }
+  .btn-reject { background: rgba(255,59,48,0.1); color: var(--red); }
+
+  .empty, .loading, .login-box {
+    text-align: center; padding: 60px 20px; color: var(--text-secondary);
+  }
+  .spinner {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 3px solid rgba(0,0,0,0.08); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .login-box h2 { color: var(--text); font-size: 20px; margin-bottom: 8px; }
+  .login-box p { font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+  .btn-primary {
+    background: var(--accent); color: white; border: none;
+    padding: 14px; border-radius: 14px; font-size: 16px; font-weight: 600;
+    width: 100%; cursor: pointer;
+  }
+
+  input.key-input {
+    width: 100%; padding: 14px; border-radius: 14px; border: 1px solid var(--border);
+    font-size: 15px; font-family: monospace; margin-bottom: 12px; background: var(--card);
+  }
+
+  .error-banner {
+    background: rgba(255,59,48,0.1); color: var(--red);
+    padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 16px;
+  }
+
+  .settings-link { text-align: center; margin-top: 28px; }
+  .settings-link a { font-size: 13px; color: var(--text-secondary); text-decoration: none; }
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <div class="title">BAYS Inbox Manager</div>
-      <div class="subtitle">Civitanova Marche • Via Papa Giovanni XXIII, 106</div>
-    </div>
-    
-    <div id="app"></div>
-  </div>
+  <div class="container" id="app"></div>
 
-  <script>
-    class BAYSManager {
-      constructor() {
-        this.view = 'init';
-        this.emails = [];
-        this.selectedEmailId = null;
-        this.category = null;
-        this.tone = null;
-        this.responses = [];
-        this.approvedResponseIdx = null;
-        this.error = null;
+<script>
+const CATEGORY_META = {
+  'Lamentela':               { icon: '⚠️', color: 'red' },
+  'Prenotazione':            { icon: '📅', color: 'blue' },
+  'Problema tecnico':        { icon: '🔧', color: 'orange' },
+  'Fatturazione':            { icon: '💳', color: 'purple' },
+  'Richiesta informazioni':  { icon: '❓', color: 'teal' },
+  'Complimento':             { icon: '⭐', color: 'green' },
+  'Cancellazione':           { icon: '❌', color: 'gray' }
+};
+
+class ACME {
+  constructor() {
+    this.view = 'init';
+    this.byCategory = {};
+    this.selectedCategory = null;
+    this.selectedEmail = null;
+    this.error = null;
+    this.lastUpdated = null;
+  }
+
+  async init() {
+    const key = localStorage.getItem('claude_api_key');
+    if (!key) { this.view = 'setup'; this.render(); return; }
+    await this.loadEmails();
+  }
+
+  saveKey() {
+    const val = document.getElementById('keyInput').value.trim();
+    if (!val) { alert('Inserisci una API Key valida'); return; }
+    localStorage.setItem('claude_api_key', val);
+    this.loadEmails();
+  }
+
+  async loadEmails() {
+    this.view = 'loading';
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/emails-analyzed', {
+        headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
+      });
+      if (res.status === 401) { this.view = 'login'; this.render(); return; }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Errore nel caricamento');
       }
-
-      async init() {
-        const saved = localStorage.getItem('claude_api_key');
-        if (saved) {
-          await this.loadEmails();
-        } else {
-          this.view = 'setup';
-        }
-        this.render();
-      }
-
-      saveApiKey() {
-        const key = document.getElementById('apiKeyInput')?.value || '';
-        if (!key) {
-          alert('Inserisci una API Key valida!');
-          return;
-        }
-        localStorage.setItem('claude_api_key', key);
-        this.loadEmails();
-      }
-
-      async loadEmails() {
-        this.view = 'loading';
-        this.render();
-        
-        try {
-          const response = await fetch('/api/emails');
-          if (!response.ok) {
-            this.view = 'login';
-          } else {
-            const data = await response.json();
-            this.emails = data.emails || [];
-            this.view = 'dashboard';
-          }
-        } catch (error) {
-          this.view = 'login';
-        }
-        this.render();
-      }
-
-      async loginWithGmail() {
-        try {
-          const response = await fetch('/api/auth');
-          const data = await response.json();
-          window.location.href = data.authUrl;
-        } catch (error) {
-          this.error = "Errore nel login";
-          this.render();
-        }
-      }
-
-      selectEmail(id) {
-        this.selectedEmailId = id;
-        this.view = 'analyzing';
-        this.error = null;
-        this.render();
-        this.analyzeEmail();
-      }
-
-      async analyzeEmail() {
-        const email = this.emails.find(e => e.id === this.selectedEmailId);
-        if (!email) return;
-
-        const apiKey = localStorage.getItem('claude_api_key');
-
-        try {
-          const response = await fetch('/api/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              from: email.from,
-              subject: email.subject,
-              body: email.body,
-              apiKey: apiKey
-            })
-          });
-
-          if (!response.ok) {
-            throw new Error('Errore nell\'analisi');
-          }
-
-          const data = await response.json();
-          this.category = data.category;
-          this.tone = data.tone;
-          this.responses = data.responses || [];
-          this.view = 'detail';
-          this.render();
-        } catch (error) {
-          this.error = error.message;
-          this.view = 'dashboard';
-          this.render();
-        }
-      }
-
-      openGmailCompose(responseIdx) {
-        const email = this.emails.find(e => e.id === this.selectedEmailId);
-        const response = this.responses[responseIdx];
-        const toEmail = email.from.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || "cliente@example.com";
-        
-        const mailtoUrl = `https://mail.google.com/mail/?ui=2&view=cm&to=${encodeURIComponent(toEmail)}&subject=${encodeURIComponent("RE: " + email.subject)}&body=${encodeURIComponent(response)}`;
-        
-        window.open(mailtoUrl, '_blank');
-        this.approvedResponseIdx = responseIdx;
-        this.render();
-      }
-
-      reject(idx) {
-        this.responses.splice(idx, 1);
-        this.render();
-      }
-
-      goBack() {
-        this.selectedEmailId = null;
-        this.category = null;
-        this.tone = null;
-        this.responses = [];
-        this.approvedResponseIdx = null;
-        this.error = null;
-        this.view = 'dashboard';
-        this.render();
-      }
-
-      changeApiKey() {
-        localStorage.removeItem('claude_api_key');
-        this.view = 'setup';
-        this.render();
-      }
-
-      renderSetup() {
-        return `
-          <div class="setup-screen">
-            <h2>🔑 Configura Claude API</h2>
-            <p>
-              Inserisci la tua Claude API Key per iniziare.<br>
-              La key viene salvata solo nel tuo browser.
-            </p>
-            <input type="password" id="apiKeyInput" placeholder="sk-ant-v0-..." />
-            <button onclick="app.saveApiKey()">Salva e continua</button>
-          </div>
-        `;
-      }
-
-      renderLogin() {
-        return `
-          <div class="login-screen">
-            <h2>🔐 Accedi a Gmail</h2>
-            <p>
-              Clicca il bottone sotto per autorizzare BAYS Inbox Manager a leggere le tue email.
-            </p>
-            <button onclick="app.loginWithGmail()">
-              📧 Accedi con Gmail
-            </button>
-          </div>
-        `;
-      }
-
-      renderDashboard() {
-        if (this.emails.length === 0) {
-          return `
-            <div class="loader">
-              <p>Nessuna email nel tuo inbox.</p>
-            </div>
-          `;
-        }
-
-        let html = `
-          <div style="font-size: 14px; font-weight: 600; margin-bottom: 1rem;">
-            ${this.emails.length} Email
-          </div>
-          <div class="dashboard">
-        `;
-
-        this.emails.forEach(email => {
-          html += `
-            <div class="email-item" onclick="app.selectEmail('${email.id}')">
-              <div class="email-from">${email.from}</div>
-              <div class="email-subject">${email.subject}</div>
-              <div class="email-preview">${email.body}</div>
-            </div>
-          `;
-        });
-
-        html += `
-          </div>
-          <button class="secondary" onclick="app.changeApiKey()" style="margin-top: 2rem;">
-            ⚙️ Cambia Claude API Key
-          </button>
-        `;
-        return html;
-      }
-
-      renderAnalyzing() {
-        return `
-          <div class="loader">
-            <div class="spinner"></div>
-            <p>Claude sta analizzando...</p>
-          </div>
-        `;
-      }
-
-      renderDetail() {
-        const email = this.emails.find(e => e.id === this.selectedEmailId);
-        if (!email) return '';
-
-        let html = `
-          <button class="back-btn" onclick="app.goBack()">← Torna alla lista</button>
-          
-          <div class="email-detail">
-            <div class="meta-row">
-              <span class="meta-label">Da:</span> ${email.from}
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Oggetto:</span> ${email.subject}
-            </div>
-            <div style="margin-top: 12px;">
-              <span class="badge">${this.category}</span>
-              <span class="badge">${this.tone}</span>
-            </div>
-          </div>
-          
-          <div style="font-size: 14px; font-weight: 600; margin-bottom: 1rem;">
-            3 Risposte consigliate
-          </div>
-        `;
-
-        this.responses.forEach((resp, idx) => {
-          const isApproved = this.approvedResponseIdx === idx;
-          html += `
-            <div class="response-option">
-              <div class="response-label">Opzione ${idx + 1}</div>
-              <div class="response-text">${resp}</div>
-              <div class="button-group">
-                <button class="approve" onclick="app.openGmailCompose(${idx})">
-                  ✓ Approva e apri Gmail
-                </button>
-                <button class="reject" onclick="app.reject(${idx})">
-                  ✗ Rifiuta
-                </button>
-              </div>
-              ${isApproved ? '<div class="status-approved">✓ Mail aperta in Gmail</div>' : ''}
-            </div>
-          `;
-        });
-
-        return html;
-      }
-
-      render() {
-        const app = document.getElementById('app');
-        let html = '';
-
-        if (this.error) {
-          html = `<div class="error">⚠️ ${this.error}</div>`;
-        }
-
-        if (this.view === 'setup') {
-          html += this.renderSetup();
-        } else if (this.view === 'init' || this.view === 'loading') {
-          html += `<div class="loader"><div class="spinner"></div><p>Caricamento...</p></div>`;
-        } else if (this.view === 'login') {
-          html += this.renderLogin();
-        } else if (this.view === 'dashboard') {
-          html += this.renderDashboard();
-        } else if (this.view === 'analyzing') {
-          html += this.renderAnalyzing();
-        } else if (this.view === 'detail') {
-          html += this.renderDetail();
-        }
-
-        app.innerHTML = html;
-      }
+      const data = await res.json();
+      this.byCategory = data.byCategory || {};
+      this.lastUpdated = new Date();
+      this.view = 'dashboard';
+    } catch (e) {
+      this.error = e.message;
+      this.view = 'dashboard';
     }
+    this.render();
+  }
 
-    const app = new BAYSManager();
-    app.init();
-  </script>
+  async loginWithGmail() {
+    const res = await fetch('/api/auth');
+    const data = await res.json();
+    window.location.href = data.authUrl;
+  }
+
+  openCategory(cat) {
+    this.selectedCategory = cat;
+    this.view = 'emails';
+    this.render();
+  }
+
+  openEmail(email) {
+    this.selectedEmail = email;
+    this.view = 'detail';
+    this.render();
+  }
+
+  async sendResponse(idx) {
+    const email = this.selectedEmail;
+    const resp = email.responses[idx];
+    const to = (email.from.match(/[\w.-]+@[\w.-]+\.\w+/) || [])[0] || '';
+    const subject = 'RE: ' + email.subject;
+    try {
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, subject, body: resp })
+      });
+      if (!res.ok) throw new Error('Invio fallito');
+      email.sentIdx = idx;
+      this.render();
+    } catch (e) {
+      this.error = e.message;
+      this.render();
+    }
+  }
+
+  rejectResponse(idx) {
+    this.selectedEmail.responses.splice(idx, 1);
+    this.render();
+  }
+
+  goBack() {
+    if (this.view === 'detail') { this.view = 'emails'; this.selectedEmail = null; }
+    else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
+    this.render();
+  }
+
+  resetKey() {
+    localStorage.removeItem('claude_api_key');
+    this.view = 'setup';
+    this.render();
+  }
+
+  // ---------- RENDER ----------
+
+  renderSetup() {
+    return `
+      <div class="topbar"><div class="eyebrow">Configurazione</div><h1>ACME</h1></div>
+      <div class="login-box" style="text-align:left; padding: 20px 4px;">
+        <h2>Chiave Claude API</h2>
+        <p>Serve una sola volta. Resta salvata sul dispositivo.</p>
+        <input class="key-input" id="keyInput" type="password" placeholder="sk-ant-...">
+        <button class="btn-primary" onclick="app.saveKey()">Continua</button>
+      </div>`;
+  }
+
+  renderLogin() {
+    return `
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>ACME</h1></div>
+      <div class="login-box">
+        <h2>Accedi con Gmail</h2>
+        <p>Autorizza ACME a leggere la posta in arrivo.</p>
+        <button class="btn-primary" onclick="app.loginWithGmail()">Accedi con Gmail</button>
+      </div>`;
+  }
+
+  renderLoading() {
+    return `
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>ACME</h1></div>
+      <div class="loading"><div class="spinner"></div>Analisi della posta in corso…</div>`;
+  }
+
+  renderDashboard() {
+    const cards = Object.entries(CATEGORY_META).map(([cat, meta]) => {
+      const count = (this.byCategory[cat] || []).length;
+      return `
+        <div class="card" onclick="app.openCategory('${cat}')">
+          <div class="icon ${meta.color}">${meta.icon}</div>
+          <div class="name">${cat}</div>
+          <div class="count ${count === 0 ? 'zero' : ''}">${count}</div>
+        </div>`;
+    }).join('');
+
+    const updatedText = this.lastUpdated
+      ? 'Aggiornato ' + this.lastUpdated.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+      : '';
+
+    return `
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>ACME</h1></div>
+      ${this.error ? `<div class="error-banner">${this.error}</div>` : ''}
+      <div class="grid">${cards}</div>
+      <div class="refresh-row">
+        <div class="status">${updatedText}</div>
+        <button class="icon-btn" onclick="app.loadEmails()">↻</button>
+      </div>
+      <div class="settings-link"><a onclick="app.resetKey()">Cambia chiave API</a></div>`;
+  }
+
+  renderEmails() {
+    const emails = this.byCategory[this.selectedCategory] || [];
+    const meta = CATEGORY_META[this.selectedCategory];
+    const rows = emails.length ? emails.map(e => `
+        <div class="email-row" onclick='app.openEmail(${JSON.stringify(e).replace(/'/g, "&#39;")})'>
+          <div class="from">${this.escape(e.from)}</div>
+          <div class="subject">${this.escape(e.subject)}</div>
+          <div class="preview">${this.escape(e.body)}</div>
+          <div class="ready-badge">● Risposte pronte</div>
+        </div>`).join('')
+      : `<div class="empty">Nessuna email in questa categoria</div>`;
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ Categorie</div>
+      </div>
+      <div class="list-title" style="margin-bottom:16px;">${meta.icon} ${this.selectedCategory}</div>
+      ${rows}`;
+  }
+
+  renderDetail() {
+    const e = this.selectedEmail;
+    const toneClass = (e.tone || '').toLowerCase();
+    const responses = (e.responses || []).map((r, idx) => {
+      const sent = e.sentIdx === idx;
+      return `
+        <div class="response-card">
+          <div class="opt-label">OPZIONE ${idx + 1}</div>
+          <div class="body-text">${this.escape(r)}</div>
+          <div class="btn-row">
+            <button class="btn btn-send ${sent ? 'sent' : ''}" onclick="app.sendResponse(${idx})">${sent ? '✓ Inviata' : 'Invia'}</button>
+            <button class="btn btn-reject" onclick="app.rejectResponse(${idx})">Scarta</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
+        <div class="detail-row"><span class="label">Oggetto</span>${this.escape(e.subject)}</div>
+        <div class="pill-row">
+          <span class="pill">${e.category}</span>
+          <span class="pill tone-${toneClass}">${e.tone}</span>
+        </div>
+      </div>
+      <div class="section-title">Risposte suggerite</div>
+      ${responses}`;
+  }
+
+  escape(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+  }
+
+  render() {
+    const el = document.getElementById('app');
+    if (this.view === 'setup') el.innerHTML = this.renderSetup();
+    else if (this.view === 'login') el.innerHTML = this.renderLogin();
+    else if (this.view === 'loading' || this.view === 'init') el.innerHTML = this.renderLoading();
+    else if (this.view === 'dashboard') el.innerHTML = this.renderDashboard();
+    else if (this.view === 'emails') el.innerHTML = this.renderEmails();
+    else if (this.view === 'detail') el.innerHTML = this.renderDetail();
+  }
+}
+
+const app = new ACME();
+app.init();
+</script>
 </body>
 </html>
