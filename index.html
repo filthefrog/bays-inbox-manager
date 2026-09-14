@@ -41,153 +41,149 @@
       color: #666;
     }
     
-    .dashboard {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 12px;
-      margin-bottom: 2rem;
+    .section {
+      margin-bottom: 1.5rem;
     }
     
-    .category-card {
-      background: white;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      padding: 1rem;
-      cursor: pointer;
-      text-align: center;
-      transition: all 0.2s;
-    }
-    
-    .category-card:hover {
-      border-color: #0084ff;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-    }
-    
-    .category-icon {
-      font-size: 28px;
-      margin-bottom: 8px;
-    }
-    
-    .category-label {
-      font-size: 11px;
+    .label {
+      font-size: 12px;
+      font-weight: 600;
       color: #666;
-      font-weight: 500;
-      margin-bottom: 6px;
       text-transform: uppercase;
+      margin-bottom: 8px;
+      display: block;
     }
     
-    .category-count {
-      font-size: 28px;
-      font-weight: 600;
-      color: #0084ff;
-    }
-    
-    .back-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
+    input, textarea {
+      width: 100%;
+      padding: 12px;
       font-size: 14px;
-      color: #0084ff;
-      cursor: pointer;
-      background: none;
-      border: none;
-      margin-bottom: 1rem;
-      font-weight: 500;
-    }
-    
-    .back-btn:hover {
-      text-decoration: underline;
-    }
-    
-    .email-item {
-      background: white;
       border: 1px solid #e5e5e5;
       border-radius: 8px;
-      padding: 1rem;
+      font-family: inherit;
       margin-bottom: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
     }
     
-    .email-item:hover {
+    textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+    
+    input:focus, textarea:focus {
+      outline: none;
       border-color: #0084ff;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
     }
     
-    .email-from {
+    button {
+      padding: 12px 16px;
       font-size: 14px;
       font-weight: 600;
-      margin-bottom: 4px;
-    }
-    
-    .email-subject {
-      font-size: 13px;
-      color: #666;
+      border: none;
+      border-radius: 8px;
+      background: #0084ff;
+      color: white;
+      cursor: pointer;
+      width: 100%;
       margin-bottom: 8px;
     }
     
-    .email-preview {
-      font-size: 13px;
-      color: #999;
-      line-height: 1.5;
-      margin-bottom: 12px;
-      max-height: 60px;
-      overflow: hidden;
+    button:hover {
+      background: #0066cc;
     }
     
-    .email-meta {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
     }
     
-    .badge {
-      background: #e8f3ff;
+    .secondary {
+      background: white;
       color: #0084ff;
-      font-size: 11px;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-weight: 500;
+      border: 1px solid #0084ff;
     }
     
-    .expand-btn {
-      font-size: 13px;
-      color: #0084ff;
-      cursor: pointer;
-      background: none;
-      border: none;
-      text-decoration: underline;
-      font-weight: 500;
+    .secondary:hover {
+      background: #f0f7ff;
+    }
+    
+    .approve {
+      background: #31a24c;
+    }
+    
+    .approve:hover {
+      background: #2a8c41;
+    }
+    
+    .reject {
+      background: white;
+      color: #dc3545;
+      border: 1px solid #dc3545;
+    }
+    
+    .reject:hover {
+      background: #fff5f6;
+    }
+    
+    .hidden {
+      display: none;
+    }
+    
+    .loader {
+      text-align: center;
+      padding: 2rem;
+    }
+    
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #0084ff;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
     
     .email-detail {
       background: #f9f9f9;
       border: 1px solid #e5e5e5;
       border-radius: 8px;
-      padding: 1.5rem;
-      margin: 1.5rem 0;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
     }
     
-    .email-text {
-      font-size: 14px;
-      line-height: 1.6;
-      margin-bottom: 1rem;
-      white-space: pre-wrap;
-      word-wrap: break-word;
+    .meta-row {
+      font-size: 13px;
+      margin-bottom: 8px;
     }
     
-    .responses-label {
-      font-size: 14px;
+    .meta-label {
       font-weight: 600;
-      margin: 2rem 0 1rem 0;
+      color: #666;
+    }
+    
+    .badge {
+      display: inline-block;
+      background: #e8f3ff;
+      color: #0084ff;
+      font-size: 11px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-weight: 600;
+      margin-right: 8px;
+      margin-bottom: 8px;
     }
     
     .response-option {
       background: white;
       border: 1px solid #e5e5e5;
       border-radius: 8px;
-      padding: 1rem;
+      padding: 1.5rem;
       margin-bottom: 12px;
     }
     
@@ -195,7 +191,7 @@
       font-size: 12px;
       color: #666;
       font-weight: 600;
-      margin-bottom: 8px;
+      margin-bottom: 12px;
       text-transform: uppercase;
     }
     
@@ -205,51 +201,45 @@
       margin-bottom: 12px;
       white-space: pre-wrap;
       word-wrap: break-word;
+      background: #f9f9f9;
+      padding: 12px;
+      border-radius: 4px;
     }
     
-    .buttons {
+    .button-group {
       display: flex;
       gap: 8px;
-      flex-wrap: wrap;
     }
     
-    button {
-      padding: 8px 14px;
-      font-size: 13px;
-      font-weight: 600;
-      border: 1px solid #e5e5e5;
-      border-radius: 4px;
-      background: white;
-      color: #1a1a1a;
-      cursor: pointer;
-    }
-    
-    button:hover {
-      background: #f0f0f0;
-    }
-    
-    .approve {
-      background: #31a24c;
-      color: white;
-      border-color: #31a24c;
-    }
-    
-    .approve:hover {
-      background: #2a8c41;
+    .button-group button {
+      flex: 1;
+      margin-bottom: 0;
     }
     
     .status-approved {
       background: #e8f5e9;
       color: #31a24c;
-      padding: 8px 12px;
+      padding: 12px;
       border-radius: 4px;
-      font-size: 12px;
-      margin-top: 12px;
+      font-size: 13px;
       font-weight: 600;
+      margin-top: 12px;
     }
     
-    .hidden {
-      display: none;
+    .error {
+      background: #ffebee;
+      color: #c62828;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 13px;
+    }
+    
+    .back-btn {
+      background: white;
+      color: #0084ff;
+      border: 1px solid #0084ff;
+      margin-bottom: 1rem;
     }
   </style>
 </head>
@@ -264,291 +254,298 @@
   </div>
 
   <script>
-    const mockEmails = [
-      {
-        id: 1,
-        from: "Marco Rossi",
-        subject: "Delusione totale - Camera sporca e rumorosa",
-        text: "Sono appena uscito dalla vostra struttura e devo dirvi che sono rimasto deluso. La camera aveva polvere sugli scaffali, il bagno non era pulito bene e per tutta la notte c'è stato rumore dai vicini che nessuno ha fermato. Ho pagato 120 euro per una notte e mi aspettavo qualcosa di più. Non lo consiglio a nessuno.",
-        category: "Lamentela",
-        tone: "Arrabbiato",
-        icon: "⚠️",
-        responses: [
-          "Caro Marco,\n\nLa ringraziamo per il feedback e mi scuso sinceramente per l'esperienza che ha avuto. Sappiamo quanto sia importante la pulizia e il riposo, e chiaramente non siamo stati all'altezza questa volta.\n\nHo già parlato personalmente con il nostro team di pulizia per capire cosa è andato storto. Per quanto riguarda il rumore notturno, stiamo rivedendo il nostro protocollo.\n\nCordiali saluti,\nFilippo",
-          "Caro Marco,\n\nLeggo con dispiacere la sua email. Non è accettabile quello che ha descritto, e le devo le scuse più sincere della mia parte.\n\nIl nostro obiettivo è sempre stato offrire comfort e qualità, e questa volta abbiamo fallito su entrambi i fronti.\n\nCordiali saluti,\nFilippo",
-          "Caro Marco,\n\nGrazie per avere il coraggio di comunicarci direttamente il suo disappunto. Ho parlato col team: la pulizia della camera non rispetta i nostri standard, e il rumore non è stato gestito come avrebbe dovuto.\n\nCordiali saluti,\nFilippo"
-        ]
-      },
-      {
-        id: 2,
-        from: "Luca Bianchi",
-        subject: "Prenotazione per agosto",
-        text: "Salve,\n\nVorrei prenotare due camere doppie per agosto 15-20 (5 notti) per un gruppo di amici. Abbiamo visto il vostro sito. Quanto costa per due camere? Accettate pagamento in contanti all'arrivo? E avete parcheggio?",
-        category: "Prenotazione",
-        tone: "Cortese",
-        icon: "📅",
-        responses: [
-          "Caro Luca,\n\nGrazie per l'interesse! Siamo felicissimi di potervi ospitare ad agosto.\n\nDue camere doppie per 5 notti: 110€ a notte (220€ notte totale). Accettiamo bonifico o carta di credito online; il contanti all'arrivo non è possibile per garantire la prenotazione.\n\nSì, parcheggio gratuito e privato incluso.\n\nCordiali saluti,\nFilippo",
-          "Caro Luca,\n\nPerfetto, posso aiutarvi con la prenotazione.\n\nTariffe: 110€ a notte per due camere (15-20 agosto sono disponibili). Pagamento: bonifico o carta online. Parcheggio: sì, incluso e gratuito.\n\nPotete prenotare online o chiamarmi direttamente.\n\nCordiali saluti,\nFilippo",
-          "Caro Luca,\n\nGrazie per averci contattato. Due camere a 110€ notte, totale 550€ per 5 notti. Parcheggio privato incluso. Pagamento tramite bonifico o carta.\n\nMi contatti per completare la prenotazione.\n\nCordiali saluti,\nFilippo"
-        ]
-      },
-      {
-        id: 3,
-        from: "Daniele",
-        subject: "WiFi non funziona",
-        text: "Ciao,\n\nSono in camera e il WiFi non mi prende. Ho provato a riavviare il telefono ma niente. Mi serve per lavoro.\n\nAiuto!",
-        category: "Problema tecnico",
-        tone: "Urgente",
-        icon: "🔧",
-        responses: [
-          "Ciao Daniele,\n\nArrivando subito! Nel frattempo prova questi step:\n1. Vai in Impostazioni WiFi e dimentica la rete \"BAYS_WiFi\"\n2. Riconettiti usando la password sulla card in camera\n3. Riavvia il telefono\n\nSe non funziona, vengo io stesso a controllare. Sono al piano terra.\n\nCiao!",
-          "Ciao Daniele,\n\nMi dispiace! Sto venendo a controllare. Nel frattempo: prova a fare reset della rete WiFi nelle impostazioni del telefono.\n\nSarò lì tra 5 minuti.\n\nFilippo",
-          "Ciao,\n\nEccomi! Vengo a controllare l'hardware subito. Se nel frattempo potessi riavviare il modem (lo trovi in camera), spesso risolve.\n\nSarò lì tra poco!\n\nFilippo"
-        ]
-      },
-      {
-        id: 4,
-        from: "Sabrina",
-        subject: "Aria condizionata rotta",
-        text: "Sono in camera 7 e l'aria condizionata non funziona. Fa caldo da morire e ho pagato il prezzo pieno. Voglio una soluzione adesso!",
-        category: "Lamentela",
-        tone: "Arrabbiato",
-        icon: "⚠️",
-        responses: [
-          "Cara Sabrina,\n\nPurtroppo il guasto è stato segnalato solo ora. Abbiamo contattato il tecnico che arriverà entro 2 ore.\n\nNel frattempo, ti offriamo di spostarti in camera 4 (è libera, stessa categoria) che ha l'A/C funzionante, oppure se preferisci rimborseremo la notte.\n\nCi dispiace sinceramente.\n\nFilippo",
-          "Cara Sabrina,\n\nMi scuso per il disagio. Il tecnico è stato chiamato e arriverà il prima possibile.\n\nNel frattempo ti offro di cambiare camera (camera 4, clima perfetto) senza costi aggiuntivi.\n\nFilippo",
-          "Cara Sabrina,\n\nLo so che è frustrante. Ho già contattato il tecnico d'emergenza. Arriverà entro 2 ore.\n\nTi conviene cambiare camera nel frattempo? La 4 è pronta e perfetta.\n\nFilippo"
-        ]
-      },
-      {
-        id: 5,
-        from: "Anna Costa",
-        subject: "Fattura ricevuta ma non corrisponde",
-        text: "Salve,\n\nHo ricevuto la fattura per la prenotazione del 10-12 ottobre. Dice 250 euro ma io avevo pagato già 180 euro in anticipo tramite bonifico. Come mai la differenza?",
-        category: "Fatturazione",
-        tone: "Neutro",
-        icon: "💳",
-        responses: [
-          "Cara Anna,\n\nHa ragione. Il sistema aveva registrato due addebiti per errore: uno del bonifico anticipato (180€) e uno della carta al checkout (250€). Non è corretto.\n\nHo già cancellato il secondo addebito dalla vostra carta. Riceverete il rimborso di 250€ entro 3-5 giorni lavorativi.\n\nMi scusi per il disagio.\n\nFilippo",
-          "Cara Anna,\n\nScusami, è stato un errore di sistema. Ho annullato il doppio addebito. Vi rimborserò i 250€ della carta entro questa settimana.\n\nGrazie per la segnalazione.\n\nFilippo",
-          "Cara Anna,\n\nLeggo bene la discrepanza. C'era un'anomalia nel sistema di pagamento che ha generato due addebiti. Ho risolto: la carta sarà rimborsata entro 5 giorni.\n\nCordiali saluti,\nFilippo"
-        ]
-      },
-      {
-        id: 6,
-        from: "Giulia Martini",
-        subject: "Voglio cancellare",
-        text: "Ho prenotato per novembre 20-22 ma adesso la situazione è cambiata. Posso cancellare e avere il rimborso?",
-        category: "Cancellazione",
-        tone: "Neutro",
-        icon: "❌",
-        responses: [
-          "Cara Giulia,\n\nCerto, nessun problema. La nostra policy è: cancellazione entro 14 giorni dall'arrivo = rimborso totale; oltre 14 giorni = 50% rimborso.\n\nSiete nel termine? Se sì, cancello tutto e rimborso entro 5 giorni.\n\nFatemi sapere.\n\nFilippo",
-          "Cara Giulia,\n\nPerfetto, possiamo cancellare. Quanti giorni mancano all'arrivo? Se sono più di 14, rimborso totale. Se meno, applicherò la policy di cancellazione.\n\nFatemi sapere quando parte la vostra prenotazione.\n\nFilippo",
-          "Cara Giulia,\n\nCapisco. Per la cancellazione dipende da quando era previsto l'arrivo. Entro 14 giorni: rimborso totale. Oltre: 50% rimborso per policy.\n\nMi contatti e risolviamo subito.\n\nFilippo"
-        ]
-      },
-      {
-        id: 7,
-        from: "Lucia Ricci",
-        subject: "Informazioni sulla colazione",
-        text: "Buongiorno,\n\nHo visto nel vostro sito che è un affittacamere. La colazione è inclusa nella prenotazione oppure è a pagamento?",
-        category: "Richiesta informazioni",
-        tone: "Cortese",
-        icon: "❓",
-        responses: [
-          "Buongiorno Lucia,\n\nGrazie per la domanda. BAYS è un affittacamere, quindi non è inclusa la colazione. L'appartamento ha una cucina completamente attrezzata dove potete preparare quello che volete.\n\nSe volete informazioni su colazioni nearby, sono felice di suggerirvi posti.\n\nCordiali saluti,\nFilippo",
-          "Buongiorno Lucia,\n\nLa colazione non è inclusa perché affittiamo la casa come appartamento indipendente. Però avrete la cucina completa disponibile.\n\nSe serve, posso consigliarvi colazioni/bar nella zona.\n\nFilippo",
-          "Buongiorno,\n\nNo, colazione non inclusa. Affittacamere significa total autonomy con cucina completa. Se interessati, conosco ottimi bar vicini per colazione.\n\nCordiali saluti,\nFilippo"
-        ]
-      },
-      {
-        id: 8,
-        from: "Paolo Mancini",
-        subject: "Bellissima esperienza!",
-        text: "Che dire, siamo stati due notti nella vostra struttura e abbiamo avuto un'esperienza bellissima. Tutto perfetto, dalla pulizia alla posizione. La prossima volta che passiamo da Civitanova vi contatteremo di sicuro. Grazie mille!",
-        category: "Complimento",
-        tone: "Cortese",
-        icon: "⭐",
-        responses: [
-          "Caro Paolo,\n\nMi rende molto felice leggere questo feedback! Siete stati ospiti meravigliosi e ci ha fatto piacere ospitarvi.\n\nTorneremo a migliorare ancora per l'occasione prossima. Un abbraccio!\n\nFilippo",
-          "Caro Paolo,\n\nGrazie mille per le gentili parole. È feedback come il vostro che ci motiva a fare sempre meglio.\n\nVi aspettiamo presto!\n\nFilippo",
-          "Caro Paolo,\n\nVi ringrazio davvero. Ospiti come voi rendono il nostro lavoro ancora più piacevole.\n\nA presto!\n\nFilippo"
-        ]
-      }
-    ];
+    const KNOWLEDGE_BASE = {
+      name: "BAYS",
+      address: "Via Papa Giovanni XXIII, 106, Civitanova Marche (MC)",
+      type: "Affittacamere",
+      rooms: 2,
+      beds: 4,
+      bathrooms: 2,
+      sqm: 75,
+      priceHigh: "€150/notte",
+      priceLow: "€80/notte",
+      discount7nights: "-15%",
+      discount30nights: "-30%",
+      beach: "1,6 km",
+      parking: "Garage privato incluso",
+      wifi: "Fibra ottica 100 Mbps",
+      checkin: "Qualsiasi ora (self check-in digitale)",
+      checkout: "Entro le 11:00",
+      cancellation: "Entro 14 giorni: rimborso totale. 7-14 giorni: 50%. Entro 7: nessun rimborso",
+      noBreakfast: "No colazione (affittacamere autonomo)",
+      contactEmail: "info@baysvilla.it",
+      contactPhone: "+39 375 XXXXXX"
+    };
 
-    class App {
+    class BAYSManager {
       constructor() {
-        this.view = 'dashboard';
-        this.selectedCategory = null;
-        this.selectedEmailId = null;
-        this.approvedEmails = new Set();
-        this.categories = {
-          "Lamentela": "⚠️",
-          "Prenotazione": "📅",
-          "Problema tecnico": "🔧",
-          "Fatturazione": "💳",
-          "Richiesta informazioni": "❓",
-          "Complimento": "⭐",
-          "Cancellazione": "❌"
-        };
+        this.view = 'setup';
+        this.apiKey = null;
+        this.currentEmail = null;
+        this.category = null;
+        this.tone = null;
+        this.responses = [];
+        this.approvedResponseIdx = null;
       }
 
-      getCategoryCount(cat) {
-        return mockEmails.filter(e => e.category === cat).length;
-      }
+      async callClaudeAPI(messages) {
+        try {
+          const response = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": this.apiKey,
+              "anthropic-version": "2023-06-01"
+            },
+            body: JSON.stringify({
+              model: "claude-3-5-sonnet-20241022",
+              max_tokens: 2000,
+              messages: messages
+            })
+          });
 
-      getCategoryEmails(cat) {
-        return mockEmails.filter(e => e.category === cat);
-      }
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error?.message || "Errore API");
+          }
 
-      getSelectedEmail() {
-        return mockEmails.find(e => e.id === this.selectedEmailId);
-      }
-
-      renderDashboard() {
-        let html = '<div class="dashboard">';
-        for (const [cat, icon] of Object.entries(this.categories)) {
-          const count = this.getCategoryCount(cat);
-          html += `
-            <div class="category-card" onclick="app.selectCategory('${cat}')">
-              <div class="category-icon">${icon}</div>
-              <div class="category-label">${cat}</div>
-              <div class="category-count">${count}</div>
-            </div>
-          `;
+          const data = await response.json();
+          return data.content[0].text;
+        } catch (error) {
+          throw new Error("Errore nella chiamata API: " + error.message);
         }
-        html += '</div>';
-        return html;
       }
 
-      renderEmails() {
-        const emails = this.getCategoryEmails(this.selectedCategory);
-        let html = `
-          <button class="back-btn" onclick="app.goBack()">← Indietro</button>
-          <div style="font-size: 14px; font-weight: 600; margin-bottom: 1rem;">${this.selectedCategory} (${emails.length})</div>
+      async analyzeEmail() {
+        if (!this.currentEmail.from || !this.currentEmail.subject || !this.currentEmail.body) {
+          alert("Compila tutti i campi!");
+          return;
+        }
+
+        this.view = 'analyzing';
+        this.render();
+
+        try {
+          // Categorizzazione
+          const categoryPrompt = `Sei un assistente per il gestionale di un affittacamere (BAYS, Civitanova Marche).
+          
+Categorizza questa email in UNA sola categoria:
+- Lamentela
+- Prenotazione
+- Problema tecnico
+- Fatturazione
+- Richiesta informazioni
+- Complimento
+- Cancellazione
+
+Email:
+From: ${this.currentEmail.from}
+Subject: ${this.currentEmail.subject}
+Body: ${this.currentEmail.body}
+
+Rispondi solo con: "Categoria: [nome categoria]" e "Tone: [Cortese/Neutro/Urgente/Arrabbiato]"`;
+
+          const categoryResponse = await this.callClaudeAPI([
+            { role: "user", content: categoryPrompt }
+          ]);
+
+          // Estrai categoria e tone
+          const catMatch = categoryResponse.match(/Categoria:\s*(.+)/);
+          const toneMatch = categoryResponse.match(/Tone:\s*(.+)/);
+          
+          this.category = catMatch ? catMatch[1].trim() : "Richiesta informazioni";
+          this.tone = toneMatch ? toneMatch[1].trim() : "Neutro";
+
+          // Genera risposte
+          const responsePrompt = `Sei Filippo, gestore di BAYS (affittacamere a Civitanova Marche).
+
+KNOWLEDGE BASE:
+${JSON.stringify(KNOWLEDGE_BASE, null, 2)}
+
+TONE DI VOICE: Caldo, responsabile, professionale, umano. Proteggo l'azienda al 100% senza scuse. Riconosco i problemi del cliente ma non faccio promesse impossibili. Veloce nella formulazione, soluzioni concrete.
+
+Email ricevuta:
+From: ${this.currentEmail.from}
+Subject: ${this.currentEmail.subject}
+Body: ${this.currentEmail.body}
+
+Categoria: ${this.category}
+Tone cliente: ${this.tone}
+
+Genera 3 risposte email perfette, ognuna leggermente diversa nello stile ma tutte certificate, professionali e coerenti col tone di BAYS. 
+
+Formato risposta:
+---RISPOSTA 1---
+[testo della risposta]
+---RISPOSTA 2---
+[testo della risposta]
+---RISPOSTA 3---
+[testo della risposta]`;
+
+          const responsesText = await this.callClaudeAPI([
+            { role: "user", content: responsePrompt }
+          ]);
+
+          // Estrai le 3 risposte
+          const respMatches = responsesText.split(/---RISPOSTA \d+---/);
+          this.responses = respMatches
+            .slice(1, 4)
+            .map(r => r.trim())
+            .filter(r => r.length > 0);
+
+          if (this.responses.length < 3) {
+            this.responses = Array(3).fill("Risposta non generata correttamente");
+          }
+
+          this.view = 'detail';
+          this.render();
+        } catch (error) {
+          this.view = 'setup';
+          alert("Errore: " + error.message);
+          this.render();
+        }
+      }
+
+      openGmailCompose(responseIdx) {
+        const response = this.responses[responseIdx];
+        const toEmail = this.currentEmail.from.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || "cliente@example.com";
+        
+        const mailtoUrl = `https://mail.google.com/mail/?ui=2&view=cm&to=${encodeURIComponent(toEmail)}&subject=${encodeURIComponent("RE: " + this.currentEmail.subject)}&body=${encodeURIComponent(response)}`;
+        
+        window.open(mailtoUrl, '_blank');
+        this.approvedResponseIdx = responseIdx;
+        this.render();
+      }
+
+      reject(idx) {
+        this.responses.splice(idx, 1);
+        this.render();
+      }
+
+      setApiKey(key) {
+        this.apiKey = key;
+        this.view = 'input';
+        this.render();
+      }
+
+      resetForm() {
+        this.currentEmail = { from: '', subject: '', body: '' };
+        this.category = null;
+        this.tone = null;
+        this.responses = [];
+        this.approvedResponseIdx = null;
+        this.view = 'input';
+        this.render();
+      }
+
+      renderSetup() {
+        return `
+          <div class="section">
+            <label class="label">Inserisci la tua Claude API Key</label>
+            <input type="password" id="apiKeyInput" placeholder="sk-ant-v0-..." style="margin-bottom: 1rem;">
+            <button onclick="app.setApiKey(document.getElementById('apiKeyInput').value)">
+              Prosegui
+            </button>
+            <p style="font-size: 12px; color: #666; margin-top: 1rem;">
+              La key rimane solo nel tuo browser. Non viene inviata da nessuna parte.
+            </p>
+          </div>
         `;
-        for (const email of emails) {
-          html += `
-            <div class="email-item" onclick="app.selectEmail(${email.id})">
-              <div class="email-from">${email.from}</div>
-              <div class="email-subject">${email.subject}</div>
-              <div class="email-preview">${email.text}</div>
-              <div class="email-meta">
-                <span class="badge">${email.category}</span>
-                <span class="badge">${email.tone}</span>
-              </div>
-              <button class="expand-btn" onclick="event.stopPropagation(); app.selectEmail(${email.id})">Visualizza e rispondi →</button>
-            </div>
-          `;
-        }
-        return html;
+      }
+
+      renderInput() {
+        return `
+          <div class="section">
+            <label class="label">Da (email del cliente)</label>
+            <input type="email" id="fromInput" placeholder="cliente@example.com" value="${this.currentEmail?.from || ''}">
+            
+            <label class="label">Oggetto</label>
+            <input type="text" id="subjectInput" placeholder="Oggetto email" value="${this.currentEmail?.subject || ''}">
+            
+            <label class="label">Corpo dell'email</label>
+            <textarea id="bodyInput" placeholder="Copia il testo dell'email...">${this.currentEmail?.body || ''}</textarea>
+            
+            <button onclick="app.prepareEmail()">
+              🔍 Analizza con Claude
+            </button>
+          </div>
+        `;
+      }
+
+      renderAnalyzing() {
+        return `
+          <div class="loader">
+            <div class="spinner"></div>
+            <p>Claude sta analizzando l'email...</p>
+          </div>
+        `;
       }
 
       renderDetail() {
-        const email = this.getSelectedEmail();
-        if (!email) return '';
+        if (!this.currentEmail) return '';
         
         let html = `
-          <button class="back-btn" onclick="app.goBack()">← Indietro</button>
+          <button class="back-btn" onclick="app.resetForm()">← Nuova email</button>
+          
           <div class="email-detail">
-            <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">Da: ${email.from}</div>
-            <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">${email.subject}</div>
-            <div class="email-meta">
-              <span class="badge">${email.category}</span>
-              <span class="badge">${email.tone}</span>
+            <div class="meta-row">
+              <span class="meta-label">Da:</span> ${this.currentEmail.from}
             </div>
-            <div class="email-text">${email.text}</div>
+            <div class="meta-row">
+              <span class="meta-label">Oggetto:</span> ${this.currentEmail.subject}
+            </div>
+            <div style="margin-top: 12px;">
+              <span class="badge">${this.category}</span>
+              <span class="badge">${this.tone}</span>
+            </div>
           </div>
-          <div class="responses-label">3 Opzioni di risposta consigliate</div>
+          
+          <div style="font-size: 14px; font-weight: 600; margin-bottom: 1rem;">
+            3 Risposte consigliate
+          </div>
         `;
-        
-        for (let i = 0; i < email.responses.length; i++) {
-          const resp = email.responses[i];
-          const approvedKey = `${email.id}-${i}`;
-          const isApproved = this.approvedEmails.has(approvedKey);
+
+        this.responses.forEach((resp, idx) => {
+          const isApproved = this.approvedResponseIdx === idx;
           html += `
             <div class="response-option">
-              <div class="response-label">Opzione ${i + 1}</div>
+              <div class="response-label">Opzione ${idx + 1}</div>
               <div class="response-text">${resp}</div>
-              <div class="buttons">
-                <button class="approve" onclick="app.approve(${email.id}, ${i})">
-                  ${isApproved ? '✓ Approvata' : '✓ Approva e invia'}
+              <div class="button-group">
+                <button class="approve" onclick="app.openGmailCompose(${idx})">
+                  ✓ Approva e apri Gmail
                 </button>
-                <button onclick="app.reject(${email.id}, ${i})">✗ Rifiuta</button>
+                <button class="reject" onclick="app.reject(${idx})">
+                  ✗ Rifiuta
+                </button>
               </div>
-              ${isApproved ? '<div class="status-approved">✓ Risposta approvata. Pronto per l\'invio.</div>' : ''}
+              ${isApproved ? '<div class="status-approved">✓ Mail aperta in Gmail</div>' : ''}
             </div>
           `;
-        }
-        
+        });
+
         return html;
       }
 
-      approve(emailId, responseIdx) {
-        const email = this.getSelectedEmail();
-        if (!email) return;
-        
-        const responseText = email.responses[responseIdx];
-        
-        // Mostra la mail pronta per l'invio
-        const mailPreview = `
-To: cliente@example.com
-Subject: RE: ${email.subject}
-
-${responseText}
-
----
-BAYS • Civitanova Marche
-Via Papa Giovanni XXIII, 106
-Tel: +39 375 XXXXXX
-`;
-        
-        alert("Mail pronta per l'invio:\n\n" + mailPreview + "\n\nCopia e incolla nel tuo client email, oppure usa il tasto destro → Copia");
-        this.approvedEmails.add(`${emailId}-${responseIdx}`);
-        this.render();
-      }
-
-      reject(emailId, responseIdx) {
-        // Rimuove la risposta dalla lista
-        const email = this.getSelectedEmail();
-        if (!email) return;
-        
-        email.responses.splice(responseIdx, 1);
-        this.render();
-      }
-
-      selectCategory(cat) {
-        this.selectedCategory = cat;
-        this.view = 'emails';
-        this.render();
-      }
-
-      selectEmail(emailId) {
-        this.selectedEmailId = emailId;
-        this.view = 'detail';
-        this.render();
-      }
-
-      goBack() {
-        if (this.view === 'detail') {
-          this.view = 'emails';
-        } else {
-          this.view = 'dashboard';
-        }
-        this.render();
+      prepareEmail() {
+        this.currentEmail = {
+          from: document.getElementById('fromInput').value,
+          subject: document.getElementById('subjectInput').value,
+          body: document.getElementById('bodyInput').value
+        };
+        this.analyzeEmail();
       }
 
       render() {
         const app = document.getElementById('app');
         let html = '';
         
-        if (this.view === 'dashboard') {
-          html = this.renderDashboard();
-        } else if (this.view === 'emails') {
-          html = this.renderEmails();
+        if (this.view === 'setup') {
+          html = this.renderSetup();
+        } else if (this.view === 'input') {
+          html = this.renderInput();
+        } else if (this.view === 'analyzing') {
+          html = this.renderAnalyzing();
         } else if (this.view === 'detail') {
           html = this.renderDetail();
         }
@@ -557,7 +554,7 @@ Tel: +39 375 XXXXXX
       }
     }
 
-    const app = new App();
+    const app = new BAYSManager();
     app.render();
   </script>
 </body>
