@@ -1,0 +1,63 @@
+import { Buffer } from 'buffer';
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const token = req.cookies.gmail_token;
+  if (!token) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const { to, subject, body } = req.body;
+
+  if (!to || !subject || !body) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+
+  try {
+    // Crea il messaggio email
+    const message = [
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      'MIME-Version: 1.0',
+      '',
+      body
+    ].join('\r\n');
+
+    // Codifica in base64
+    const encodedMessage = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+    // Invia via Gmail API
+    const sendResponse = await fetch(
+      'https://www.googleapis.com/gmail/v1/users/me/messages/send',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          raw: encodedMessage
+        })
+      }
+    );
+
+    if (!sendResponse.ok) {
+      throw new Error('Failed to send email');
+    }
+
+    const result = await sendResponse.json();
+
+    return res.status(200).json({
+      success: true,
+      messageId: result.id
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+}
