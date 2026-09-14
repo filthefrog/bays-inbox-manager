@@ -33,33 +33,39 @@ export default async function handler(req, res) {
     contactPhone: "+39 375 XXXXXX"
   };
 
+  const categories = ["Lamentela", "Prenotazione", "Problema tecnico", "Fatturazione", "Richiesta informazioni", "Complimento", "Cancellazione"];
+  const tones = ["Cortese", "Neutro", "Urgente", "Arrabbiato"];
+
   try {
-    // Step 1: Categorizzazione
-    const categoryPrompt = `Sei un assistente per il gestionale di un affittacamere (BAYS, Civitanova Marche).
-    
-Categorizza questa email in UNA sola categoria:
-- Lamentela
-- Prenotazione
-- Problema tecnico
-- Fatturazione
-- Richiesta informazioni
-- Complimento
-- Cancellazione
+    // Step 1: Categorizzazione con risposta JSON
+    const categoryPrompt = `Analizza questa email e categorizzala.
 
 Email:
 From: ${from}
 Subject: ${subject}
 Body: ${body}
 
-Rispondi solo con: "Categoria: [nome categoria]" e "Tone: [Cortese/Neutro/Urgente/Arrabbiato]"`;
+Rispondi SOLO con un JSON valido (niente altro):
+{
+  "category": "una tra: Lamentela, Prenotazione, Problema tecnico, Fatturazione, Richiesta informazioni, Complimento, Cancellazione",
+  "tone": "una tra: Cortese, Neutro, Urgente, Arrabbiato"
+}`;
 
     const categoryResponse = await callClaude(apiKey, categoryPrompt);
     
-    const catMatch = categoryResponse.match(/Categoria:\s*(.+)/);
-    const toneMatch = categoryResponse.match(/Tone:\s*(.+)/);
+    let category = "Richiesta informazioni";
+    let tone = "Neutro";
     
-    const category = catMatch ? catMatch[1].trim() : "Richiesta informazioni";
-    const tone = toneMatch ? toneMatch[1].trim() : "Neutro";
+    try {
+      const jsonMatch = categoryResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (categories.includes(parsed.category)) category = parsed.category;
+        if (tones.includes(parsed.tone)) tone = parsed.tone;
+      }
+    } catch (e) {
+      // Se il JSON non è valido, usa i defaults
+    }
 
     // Step 2: Generazione risposte
     const responsePrompt = `Sei Filippo, gestore di BAYS (affittacamere a Civitanova Marche).
@@ -120,8 +126,7 @@ async function callClaude(apiKey, message) {
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: model: "claude-opus-5",
-
+      model: "claude-opus-5",
       max_tokens: 2000,
       messages: [
         { role: "user", content: message }
