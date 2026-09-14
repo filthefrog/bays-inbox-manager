@@ -234,6 +234,16 @@
       margin-bottom: 1rem;
     }
     
+    .status-approved {
+      background: #e8f5e9;
+      color: #31a24c;
+      padding: 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 12px;
+    }
+    
     .hidden {
       display: none;
     }
@@ -269,7 +279,7 @@
             this.view = 'login';
           } else {
             const data = await response.json();
-            this.emails = data.emails;
+            this.emails = data.emails || [];
             this.view = 'dashboard';
           }
         } catch (error) {
@@ -292,6 +302,7 @@
       selectEmail(id) {
         this.selectedEmailId = id;
         this.view = 'analyzing';
+        this.error = null;
         this.render();
         this.analyzeEmail();
       }
@@ -301,6 +312,19 @@
         if (!email) return;
 
         try {
+          let apiKey = localStorage.getItem('claude_api_key');
+          
+          if (!apiKey) {
+            apiKey = prompt("Inserisci la tua Claude API Key (sk-ant-v0-...):") || '';
+            if (!apiKey) {
+              this.error = "API Key richiesta";
+              this.view = 'dashboard';
+              this.render();
+              return;
+            }
+            localStorage.setItem('claude_api_key', apiKey);
+          }
+
           const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -308,7 +332,7 @@
               from: email.from,
               subject: email.subject,
               body: email.body,
-              apiKey: localStorage.getItem('claude_api_key') || prompt("Inserisci la tua Claude API Key:")
+              apiKey: apiKey
             })
           });
 
@@ -319,7 +343,7 @@
           const data = await response.json();
           this.category = data.category;
           this.tone = data.tone;
-          this.responses = data.responses;
+          this.responses = data.responses || [];
           this.view = 'detail';
           this.render();
         } catch (error) {
@@ -348,6 +372,11 @@
 
       goBack() {
         this.selectedEmailId = null;
+        this.category = null;
+        this.tone = null;
+        this.responses = [];
+        this.approvedResponseIdx = null;
+        this.error = null;
         this.view = 'dashboard';
         this.render();
       }
@@ -445,6 +474,7 @@
                   ✗ Rifiuta
                 </button>
               </div>
+              ${isApproved ? '<div class="status-approved">✓ Mail aperta in Gmail</div>' : ''}
             </div>
           `;
         });
@@ -457,7 +487,7 @@
         let html = '';
 
         if (this.error) {
-          html = `<div class="error">${this.error}</div>`;
+          html = `<div class="error">⚠️ ${this.error}</div>`;
         }
 
         if (this.view === 'loading') {
