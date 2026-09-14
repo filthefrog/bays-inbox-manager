@@ -475,9 +475,9 @@
               <div class="response-text">${resp}</div>
               <div class="buttons">
                 <button class="approve" onclick="app.approve(${email.id}, ${i})">
-                  ${isApproved ? '✓ Approvata' : '✓ Approva'}
+                  ${isApproved ? '✓ Approvata' : '✓ Approva e invia'}
                 </button>
-                <button onclick="alert('Risposta rifiutata')">✗ Rifiuta</button>
+                <button onclick="app.reject(${email.id}, ${i})">✗ Rifiuta</button>
               </div>
               ${isApproved ? '<div class="status-approved">✓ Risposta approvata. Pronto per l\'invio.</div>' : ''}
             </div>
@@ -488,7 +488,35 @@
       }
 
       approve(emailId, responseIdx) {
+        const email = this.getSelectedEmail();
+        if (!email) return;
+        
+        const responseText = email.responses[responseIdx];
+        
+        // Mostra la mail pronta per l'invio
+        const mailPreview = `
+To: cliente@example.com
+Subject: RE: ${email.subject}
+
+${responseText}
+
+---
+BAYS • Civitanova Marche
+Via Papa Giovanni XXIII, 106
+Tel: +39 375 XXXXXX
+`;
+        
+        alert("Mail pronta per l'invio:\n\n" + mailPreview + "\n\nCopia e incolla nel tuo client email, oppure usa il tasto destro → Copia");
         this.approvedEmails.add(`${emailId}-${responseIdx}`);
+        this.render();
+      }
+
+      reject(emailId, responseIdx) {
+        // Rimuove la risposta dalla lista
+        const email = this.getSelectedEmail();
+        if (!email) return;
+        
+        email.responses.splice(responseIdx, 1);
         this.render();
       }
 
