@@ -41,40 +41,6 @@
       color: #666;
     }
     
-    .section {
-      margin-bottom: 1.5rem;
-    }
-    
-    .label {
-      font-size: 12px;
-      font-weight: 600;
-      color: #666;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-      display: block;
-    }
-    
-    input, textarea {
-      width: 100%;
-      padding: 12px;
-      font-size: 14px;
-      border: 1px solid #e5e5e5;
-      border-radius: 8px;
-      font-family: inherit;
-      margin-bottom: 12px;
-    }
-    
-    textarea {
-      min-height: 80px;
-      resize: vertical;
-    }
-    
-    input:focus, textarea:focus {
-      outline: none;
-      border-color: #0084ff;
-      box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
-    }
-    
     button {
       padding: 12px 16px;
       font-size: 14px;
@@ -92,41 +58,60 @@
       background: #0066cc;
     }
     
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
+    .login-screen {
+      text-align: center;
+      padding: 2rem;
     }
     
-    .secondary {
+    .login-screen h2 {
+      margin-bottom: 1rem;
+      font-size: 20px;
+    }
+    
+    .login-screen p {
+      color: #666;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+    
+    .dashboard {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    
+    .email-item {
       background: white;
-      color: #0084ff;
-      border: 1px solid #0084ff;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      padding: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
     }
     
-    .secondary:hover {
-      background: #f0f7ff;
+    .email-item:hover {
+      border-color: #0084ff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     }
     
-    .approve {
-      background: #31a24c;
+    .email-from {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
     }
     
-    .approve:hover {
-      background: #2a8c41;
+    .email-subject {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 8px;
     }
     
-    .reject {
-      background: white;
-      color: #dc3545;
-      border: 1px solid #dc3545;
-    }
-    
-    .reject:hover {
-      background: #fff5f6;
-    }
-    
-    .hidden {
-      display: none;
+    .email-preview {
+      font-size: 12px;
+      color: #999;
+      line-height: 1.5;
+      max-height: 40px;
+      overflow: hidden;
     }
     
     .loader {
@@ -216,14 +201,29 @@
       margin-bottom: 0;
     }
     
-    .status-approved {
-      background: #e8f5e9;
-      color: #31a24c;
-      padding: 12px;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 600;
-      margin-top: 12px;
+    .approve {
+      background: #31a24c;
+    }
+    
+    .approve:hover {
+      background: #2a8c41;
+    }
+    
+    .reject {
+      background: white;
+      color: #dc3545;
+      border: 1px solid #dc3545;
+    }
+    
+    .reject:hover {
+      background: #fff5f6;
+    }
+    
+    .back-btn {
+      background: white;
+      color: #0084ff;
+      border: 1px solid #0084ff;
+      margin-bottom: 1rem;
     }
     
     .error {
@@ -232,14 +232,10 @@
       padding: 12px;
       border-radius: 8px;
       margin-bottom: 1rem;
-      font-size: 13px;
     }
     
-    .back-btn {
-      background: white;
-      color: #0084ff;
-      border: 1px solid #0084ff;
-      margin-bottom: 1rem;
+    .hidden {
+      display: none;
     }
   </style>
 </head>
@@ -256,9 +252,9 @@
   <script>
     class BAYSManager {
       constructor() {
-        this.view = 'setup';
-        this.apiKey = null;
-        this.currentEmail = null;
+        this.view = 'loading';
+        this.emails = [];
+        this.selectedEmailId = null;
         this.category = null;
         this.tone = null;
         this.responses = [];
@@ -266,55 +262,79 @@
         this.error = null;
       }
 
-      async analyzeEmail() {
-        if (!this.currentEmail.from || !this.currentEmail.subject || !this.currentEmail.body) {
-          this.error = "Compila tutti i campi!";
-          this.render();
-          return;
+      async init() {
+        try {
+          const response = await fetch('/api/emails');
+          if (!response.ok) {
+            this.view = 'login';
+          } else {
+            const data = await response.json();
+            this.emails = data.emails;
+            this.view = 'dashboard';
+          }
+        } catch (error) {
+          this.view = 'login';
         }
-
-        this.view = 'analyzing';
-        this.error = null;
         this.render();
+      }
+
+      async loginWithGmail() {
+        try {
+          const response = await fetch('/api/auth');
+          const data = await response.json();
+          window.location.href = data.authUrl;
+        } catch (error) {
+          this.error = "Errore nel login";
+          this.render();
+        }
+      }
+
+      selectEmail(id) {
+        this.selectedEmailId = id;
+        this.view = 'analyzing';
+        this.render();
+        this.analyzeEmail();
+      }
+
+      async analyzeEmail() {
+        const email = this.emails.find(e => e.id === this.selectedEmailId);
+        if (!email) return;
 
         try {
           const response = await fetch('/api/analyze', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              from: this.currentEmail.from,
-              subject: this.currentEmail.subject,
-              body: this.currentEmail.body,
-              apiKey: this.apiKey
+              from: email.from,
+              subject: email.subject,
+              body: email.body,
+              apiKey: localStorage.getItem('claude_api_key') || prompt("Inserisci la tua Claude API Key:")
             })
           });
 
           if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Errore nell\'analisi');
+            throw new Error('Errore nell\'analisi');
           }
 
           const data = await response.json();
           this.category = data.category;
           this.tone = data.tone;
           this.responses = data.responses;
-
           this.view = 'detail';
           this.render();
         } catch (error) {
           this.error = error.message;
-          this.view = 'input';
+          this.view = 'dashboard';
           this.render();
         }
       }
 
       openGmailCompose(responseIdx) {
+        const email = this.emails.find(e => e.id === this.selectedEmailId);
         const response = this.responses[responseIdx];
-        const toEmail = this.currentEmail.from.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || "cliente@example.com";
+        const toEmail = email.from.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || "cliente@example.com";
         
-        const mailtoUrl = `https://mail.google.com/mail/?ui=2&view=cm&to=${encodeURIComponent(toEmail)}&subject=${encodeURIComponent("RE: " + this.currentEmail.subject)}&body=${encodeURIComponent(response)}`;
+        const mailtoUrl = `https://mail.google.com/mail/?ui=2&view=cm&to=${encodeURIComponent(toEmail)}&subject=${encodeURIComponent("RE: " + email.subject)}&body=${encodeURIComponent(response)}`;
         
         window.open(mailtoUrl, '_blank');
         this.approvedResponseIdx = responseIdx;
@@ -326,62 +346,55 @@
         this.render();
       }
 
-      setApiKey(key) {
-        if (!key.trim()) {
-          alert('Inserisci una API Key valida!');
-          return;
-        }
-        this.apiKey = key.trim();
-        this.view = 'input';
-        this.currentEmail = { from: '', subject: '', body: '' };
+      goBack() {
+        this.selectedEmailId = null;
+        this.view = 'dashboard';
         this.render();
       }
 
-      resetForm() {
-        this.currentEmail = { from: '', subject: '', body: '' };
-        this.category = null;
-        this.tone = null;
-        this.responses = [];
-        this.approvedResponseIdx = null;
-        this.error = null;
-        this.view = 'input';
-        this.render();
-      }
-
-      renderSetup() {
+      renderLogin() {
         return `
-          <div class="section">
-            <label class="label">Inserisci la tua Claude API Key</label>
-            <input type="password" id="apiKeyInput" placeholder="sk-ant-v0-..." style="margin-bottom: 1rem;">
-            <button onclick="app.setApiKey(document.getElementById('apiKeyInput').value)">
-              Prosegui
-            </button>
-            <p style="font-size: 12px; color: #666; margin-top: 1rem;">
-              La key rimane solo nel tuo browser. Non viene inviata da nessuna parte (tranne a Claude API per l'analisi).
+          <div class="login-screen">
+            <h2>🔐 Accedi a Gmail</h2>
+            <p>
+              Clicca il bottone sotto per autorizzare BAYS Inbox Manager a leggere le tue email.<br>
+              Non condivideremo mai i tuoi dati.
             </p>
+            <button onclick="app.loginWithGmail()">
+              📧 Accedi con Gmail
+            </button>
           </div>
         `;
       }
 
-      renderInput() {
-        return `
-          ${this.error ? `<div class="error">⚠️ ${this.error}</div>` : ''}
-          
-          <div class="section">
-            <label class="label">Da (email del cliente)</label>
-            <input type="email" id="fromInput" placeholder="cliente@example.com" value="${this.currentEmail?.from || ''}">
-            
-            <label class="label">Oggetto</label>
-            <input type="text" id="subjectInput" placeholder="Oggetto email" value="${this.currentEmail?.subject || ''}">
-            
-            <label class="label">Corpo dell'email</label>
-            <textarea id="bodyInput" placeholder="Copia il testo dell'email...">${this.currentEmail?.body || ''}</textarea>
-            
-            <button onclick="app.prepareEmail()">
-              🔍 Analizza con Claude
-            </button>
+      renderDashboard() {
+        if (this.emails.length === 0) {
+          return `
+            <div class="loader">
+              <p>Nessuna email nel tuo inbox.</p>
+            </div>
+          `;
+        }
+
+        let html = `
+          <div style="font-size: 14px; font-weight: 600; margin-bottom: 1rem;">
+            ${this.emails.length} Email
           </div>
+          <div class="dashboard">
         `;
+
+        this.emails.forEach(email => {
+          html += `
+            <div class="email-item" onclick="app.selectEmail('${email.id}')">
+              <div class="email-from">${email.from}</div>
+              <div class="email-subject">${email.subject}</div>
+              <div class="email-preview">${email.body}</div>
+            </div>
+          `;
+        });
+
+        html += `</div>`;
+        return html;
       }
 
       renderAnalyzing() {
@@ -394,17 +407,18 @@
       }
 
       renderDetail() {
-        if (!this.currentEmail) return '';
-        
+        const email = this.emails.find(e => e.id === this.selectedEmailId);
+        if (!email) return '';
+
         let html = `
-          <button class="back-btn" onclick="app.resetForm()">← Nuova email</button>
+          <button class="back-btn" onclick="app.goBack()">← Torna alla lista</button>
           
           <div class="email-detail">
             <div class="meta-row">
-              <span class="meta-label">Da:</span> ${this.currentEmail.from}
+              <span class="meta-label">Da:</span> ${email.from}
             </div>
             <div class="meta-row">
-              <span class="meta-label">Oggetto:</span> ${this.currentEmail.subject}
+              <span class="meta-label">Oggetto:</span> ${email.subject}
             </div>
             <div style="margin-top: 12px;">
               <span class="badge">${this.category}</span>
@@ -431,7 +445,6 @@
                   ✗ Rifiuta
                 </button>
               </div>
-              ${isApproved ? '<div class="status-approved">✓ Mail aperta in Gmail</div>' : ''}
             </div>
           `;
         });
@@ -439,35 +452,32 @@
         return html;
       }
 
-      prepareEmail() {
-        this.currentEmail = {
-          from: document.getElementById('fromInput').value,
-          subject: document.getElementById('subjectInput').value,
-          body: document.getElementById('bodyInput').value
-        };
-        this.analyzeEmail();
-      }
-
       render() {
         const app = document.getElementById('app');
         let html = '';
-        
-        if (this.view === 'setup') {
-          html = this.renderSetup();
-        } else if (this.view === 'input') {
-          html = this.renderInput();
-        } else if (this.view === 'analyzing') {
-          html = this.renderAnalyzing();
-        } else if (this.view === 'detail') {
-          html = this.renderDetail();
+
+        if (this.error) {
+          html = `<div class="error">${this.error}</div>`;
         }
-        
+
+        if (this.view === 'loading') {
+          html += `<div class="loader"><div class="spinner"></div><p>Caricamento...</p></div>`;
+        } else if (this.view === 'login') {
+          html += this.renderLogin();
+        } else if (this.view === 'dashboard') {
+          html += this.renderDashboard();
+        } else if (this.view === 'analyzing') {
+          html += this.renderAnalyzing();
+        } else if (this.view === 'detail') {
+          html += this.renderDetail();
+        }
+
         app.innerHTML = html;
       }
     }
 
     const app = new BAYSManager();
-    app.render();
+    app.init();
   </script>
 </body>
 </html>
