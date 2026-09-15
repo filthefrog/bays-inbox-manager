@@ -106,6 +106,7 @@ export default async function handler(req, res) {
           id,
           category: v.category,
           tone: v.tone,
+          discrepancy: v.discrepancy || null,
           responses: v.responses,
           resolved: false
         }));
@@ -150,20 +151,35 @@ export default async function handler(req, res) {
 }
 
 async function analyzeAndRespond(email, apiKey) {
-  const prompt = `Analizza questa email e categorizzala + genera 3 risposte.
+  const prompt = `Sei l'assistente di gestione per Domus 106, un affittacamere a Civitanova Marche. Aiuti il gestore a rispondere alle email dei clienti.
 
-Email:
+PRINCIPI FONDAMENTALI:
+- Rappresenti SEMPRE gli interessi della struttura. Non dai per scontato che il cliente abbia automaticamente ragione.
+- Controlla con attenzione il contenuto dell'email per individuare eventuali errori, incongruenze o affermazioni che non tornano (esempio: il cliente scrive "3 notti" ma le date indicate coprono un periodo diverso; afferma qualcosa in contraddizione con altri dettagli forniti; fa richieste che non corrispondono a quanto dichiarato). Se trovi un'incongruenza, descrivila nel campo "discrepancy" e menzionala con garbo ma chiarezza in tutte e tre le risposte, chiedendo conferma invece di darla per scontata.
+- Il tono di fondo è SEMPRE educato, caldo e professionale — mai scortese o aggressivo. Quello che cambia tra le tre risposte è quanto la struttura è disposta a concedere e quanta distanza prende, non la buona educazione.
+
+Email ricevuta:
 From: ${email.from}
 Subject: ${email.subject}
 Body: ${email.body}
 
-Rispondi SOLO con JSON:
+GENERA:
+1. category: una tra Lamentela, Prenotazione, Problema tecnico, Fatturazione, Richiesta informazioni, Complimento, Cancellazione
+2. tone: il tono emotivo del CLIENTE (non della risposta), una tra Cortese, Neutro, Urgente, Arrabbiato
+3. discrepancy: se noti un errore o un'incongruenza nel messaggio del cliente, descrivila in una frase breve e concreta. Se non c'è nulla di sospetto, scrivi esattamente null.
+4. Tre risposte email con fermezza CRESCENTE:
+   - response_cortese: massima gentilezza e disponibilità, tono accomodante. Adatta quando il cliente ha chiaramente ragione o la richiesta è semplice e senza attrito.
+   - response_fermo: educata ma con più distanza. La struttura non concede automaticamente ragione, chiede chiarimenti se ci sono incongruenze, pone dei paletti chiari.
+   - response_deciso: ferma e assertiva, protegge chiaramente gli interessi della struttura. Adatta per casi di possibile malafede, richieste infondate, dispute su danni o pagamenti. Resta sempre professionale e mai offensiva, ma non lascia spazio ad ambiguità.
+
+Rispondi SOLO con questo JSON:
 {
-  "category": "una tra: Lamentela, Prenotazione, Problema tecnico, Fatturazione, Richiesta informazioni, Complimento, Cancellazione",
-  "tone": "una tra: Cortese, Neutro, Urgente, Arrabbiato",
-  "response1": "prima risposta email",
-  "response2": "seconda risposta email",
-  "response3": "terza risposta email"
+  "category": "...",
+  "tone": "...",
+  "discrepancy": "..." oppure null,
+  "response_cortese": "...",
+  "response_fermo": "...",
+  "response_deciso": "..."
 }`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -175,7 +191,7 @@ Rispondi SOLO con JSON:
     },
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1200,
+      max_tokens: 1800,
       messages: [{ role: "user", content: prompt }]
     })
   });
@@ -195,10 +211,11 @@ Rispondi SOLO con JSON:
   return {
     category: parsed.category || "Richiesta informazioni",
     tone: parsed.tone || "Neutro",
+    discrepancy: (parsed.discrepancy && parsed.discrepancy !== 'null') ? parsed.discrepancy : null,
     responses: [
-      parsed.response1 || "Risposta 1",
-      parsed.response2 || "Risposta 2",
-      parsed.response3 || "Risposta 3"
+      { label: 'Cortese', color: 'green', text: parsed.response_cortese || 'Risposta non generata' },
+      { label: 'Fermo', color: 'orange', text: parsed.response_fermo || 'Risposta non generata' },
+      { label: 'Deciso', color: 'red', text: parsed.response_deciso || 'Risposta non generata' }
     ]
   };
 }
