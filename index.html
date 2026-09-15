@@ -505,9 +505,17 @@ class ACME {
   }
 
   renderLoading() {
+    const messages = [
+      "Analisi della posta in corso…",
+      "Le trappole ACME stanno smistando la posta…",
+      "Un attimo, come Willy il Coyote aspettiamo che il piano funzioni…",
+      "Ordinando un nuovo kit ACME per organizzare l'inbox…",
+      "Beep beep… quasi pronto…"
+    ];
+    const msg = messages[Math.floor(Math.random() * messages.length)];
     return `
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>ACME</h1></div>
-      <div class="loading"><div class="spinner"></div>Analisi della posta in corso…</div>`;
+      <div class="loading"><div class="spinner"></div>${msg}</div>`;
   }
 
   renderDashboard() {
@@ -554,7 +562,7 @@ class ACME {
           <div class="ready-badge">● Risposte pronte</div>
         </div>`;
     }).join('')
-      : `<div class="empty">Nessuna email in questa categoria</div>`;
+      : `<div class="empty">Nessuna email qui — persino Willy il Coyote ogni tanto si ferma a riprendere fiato</div>`;
 
     return `
       <div class="list-header">
