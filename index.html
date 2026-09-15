@@ -200,7 +200,7 @@ class ACME {
 
   unresolvedCount(cat) {
     const emails = this.byCategory[cat] || [];
-    return emails.filter(e => !this.resolvedIds.has(e.id)).length;
+    return emails.filter(e => !this.resolvedIds.has(e.id) && !e.resolved).length;
   }
 
   async init() {
@@ -288,6 +288,11 @@ class ACME {
       email.sentIdx = idx;
       this.resolvedIds.add(email.id);
       this.saveResolvedIds();
+      fetch('/api/mark-resolved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailId: email.id })
+      }).catch(() => {});
     } catch (e) {
       this.error = e.message;
     }
@@ -410,7 +415,7 @@ class ACME {
     const emails = this.byCategory[this.selectedCategory] || [];
     const meta = CATEGORY_META[this.selectedCategory];
     const rows = emails.length ? emails.map(e => {
-      const resolved = this.resolvedIds.has(e.id);
+      const resolved = this.resolvedIds.has(e.id) || e.resolved;
       return `
         <div class="email-row" onclick='app.openEmail(${JSON.stringify(e).replace(/'/g, "&#39;")})'>
           <div class="from">${this.escape(e.from)}</div>
