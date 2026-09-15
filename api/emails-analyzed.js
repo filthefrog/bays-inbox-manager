@@ -1,7 +1,18 @@
+import { getFreshAccessToken } from '../lib/gmail-token.js';
+
 export default async function handler(req, res) {
-  const token = req.cookies.gmail_token;
-  if (!token) {
+  const refreshToken = req.cookies.gmail_refresh;
+  if (!refreshToken) {
     return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  let token;
+  try {
+    token = await getFreshAccessToken(refreshToken);
+  } catch (err) {
+    return res.status(401).json({
+      error: err.code === "REFRESH_EXPIRED" ? "Sessione scaduta, riconnetti Gmail" : "Errore nel rinnovo del token Gmail"
+    });
   }
 
   const apiKey = req.headers['x-claude-key'];
@@ -175,6 +186,7 @@ PRINCIPI FONDAMENTALI:
 - Rappresenti SEMPRE gli interessi della struttura. Non dai per scontato che il cliente abbia automaticamente ragione.
 - Controlla con attenzione il contenuto dell'email per individuare eventuali errori, incongruenze o affermazioni che non tornano (esempio: il cliente scrive "3 notti" ma le date indicate coprono un periodo diverso; afferma qualcosa in contraddizione con altri dettagli forniti; fa richieste che non corrispondono a quanto dichiarato). Se trovi un'incongruenza, descrivila nel campo "discrepancy" e menzionala con garbo ma chiarezza in tutte e tre le risposte, chiedendo conferma invece di darla per scontata.
 - Il tono di fondo è SEMPRE educato, caldo e professionale — mai scortese o aggressivo. Quello che cambia tra le tre risposte è quanto la struttura è disposta a concedere e quanta distanza prende, non la buona educazione.
+- Scrivi come scriverebbe davvero una persona alla scrivania, non come un modulo automatico: evita frasi fatte da form standard, evita la struttura troppo perfetta e simmetrica tipica di un testo generato da IA, evita elenchi puntati dentro l'email. Varia la lunghezza delle frasi, usa un tono colloquiale ma curato, come farebbe un gestore che conosce il mestiere e risponde di persona.
 
 Email ricevuta:
 From: ${email.from}
