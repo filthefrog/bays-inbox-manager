@@ -131,6 +131,10 @@
   .pill.tone-urgente, .pill.tone-arrabbiato { background: rgba(255,59,48,0.1); color: var(--red); }
 
   .section-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.02em; margin: 20px 0 10px 4px; }
+  .original-text {
+    font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    color: var(--text); opacity: 0.85;
+  }
 
   .response-card {
     background: var(--card);
@@ -496,6 +500,10 @@ class ACME {
           <span class="pill">${e.category}</span>
           <span class="pill tone-${toneClass}">${e.tone}</span>
         </div>
+      </div>
+      <div class="section-title">Messaggio originale</div>
+      <div class="detail-card">
+        <div class="original-text">${this.escape(e.body)}</div>
       </div>
       <div class="section-title">Risposte suggerite</div>
       ${responses}`;
