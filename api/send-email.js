@@ -17,14 +17,18 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Codifica l'oggetto per gestire correttamente lettere accentate e caratteri speciali
+    const encodedSubject = '=?UTF-8?B?' + Buffer.from(subject, 'utf-8').toString('base64') + '?=';
+
     // Crea il messaggio email
     const message = [
       `To: ${to}`,
-      `Subject: ${subject}`,
-      'Content-Type: text/plain; charset="UTF-8"',
+      `Subject: ${encodedSubject}`,
       'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: base64',
       '',
-      body
+      Buffer.from(body, 'utf-8').toString('base64')
     ].join('\r\n');
 
     // Codifica in base64
