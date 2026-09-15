@@ -295,6 +295,40 @@ class ACME {
     this.render();
   }
 
+  async reanalyzeEmail() {
+    const email = this.selectedEmail;
+    this.view = 'analyzing';
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/analyze-single', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-claude-key': localStorage.getItem('claude_api_key')
+        },
+        body: JSON.stringify({ from: email.from, subject: email.subject, body: email.body })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Rianalisi fallita');
+      }
+      const data = await res.json();
+      email.category = data.category;
+      email.tone = data.tone;
+      email.responses = data.responses;
+      email.analysisError = false;
+      Object.keys(this.byCategory).forEach(cat => {
+        const idx = (this.byCategory[cat] || []).findIndex(e => e.id === email.id);
+        if (idx !== -1) this.byCategory[cat][idx] = email;
+      });
+    } catch (e) {
+      this.error = e.message;
+    }
+    this.view = 'detail';
+    this.render();
+  }
+
   rejectResponse(idx) {
     this.selectedEmail.responses.splice(idx, 1);
     this.render();
@@ -417,6 +451,7 @@ class ACME {
         <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
       </div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      ${e.analysisError ? `<div class="error-banner">Analisi non riuscita per questa email.<br><button class="btn btn-primary" style="margin-top:10px;" onclick="app.reanalyzeEmail()">↻ Rianalizza</button></div>` : ''}
       <div class="detail-card">
         <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
         <div class="detail-row"><span class="label">Oggetto</span>${this.escape(e.subject)}</div>
