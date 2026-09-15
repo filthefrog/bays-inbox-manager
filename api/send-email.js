@@ -56,9 +56,26 @@ export default async function handler(req, res) {
 
     const result = await sendResponse.json();
 
+    // Verifica reale: chiediamo a Gmail conferma che il messaggio esista davvero
+    let confirmed = false;
+    try {
+      const checkResp = await fetch(
+        `https://www.googleapis.com/gmail/v1/users/me/messages/${result.id}?format=minimal`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (checkResp.ok) {
+        const checkData = await checkResp.json();
+        confirmed = (checkData.labelIds || []).includes('SENT');
+      }
+    } catch (e) {
+      // Se la verifica fallisce non blocchiamo comunque la risposta positiva
+    }
+
     return res.status(200).json({
       success: true,
-      messageId: result.id
+      messageId: result.id,
+      threadId: result.threadId,
+      confirmed
     });
 
   } catch (error) {
