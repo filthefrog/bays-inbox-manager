@@ -22,7 +22,24 @@ export default async function handler(req, res) {
 }
 
 async function analyzeAndRespond(email, apiKey) {
+  const KNOWLEDGE_BASE = `
+- Nome struttura: Domus 106
+- Indirizzo: Via Papa Giovanni XXIII, 106, Civitanova Marche (MC)
+- Tipo: Affittacamere (NON B&B — colazione non inclusa)
+- 2 camere matrimoniali, 4 posti letto totali, 2 bagni completi, 75 mq, piano 1° con ascensore
+- Parcheggio: garage privato coperto e interrato incluso
+- WiFi: fibra ottica
+- Check-in: qualsiasi ora (self check-in con codice digitale)
+- Check-out: entro le 11:00
+- Tariffe: bassa stagione 80€/notte, alta stagione (giugno-settembre) 150€/notte; sconto 15% per soggiorni di 7+ notti, 30% per 30+ notti
+- Spiaggia a circa 1,6 km
+- Cancellazione: entro 14 giorni dall'arrivo rimborso totale; 7-14 giorni rimborso 50%; entro 7 giorni nessun rimborso
+`;
+
   const prompt = `Sei l'assistente di gestione per Domus 106, un affittacamere a Civitanova Marche. Aiuti il gestore a rispondere alle email dei clienti.
+
+DATI REALI DELLA STRUTTURA (usali per rispondere correttamente, non inventare altro):
+${KNOWLEDGE_BASE}
 
 PRINCIPI FONDAMENTALI:
 - Rappresenti SEMPRE gli interessi della struttura. Non dai per scontato che il cliente abbia automaticamente ragione.
