@@ -190,17 +190,17 @@ class ACME {
     this.selectedEmail = null;
     this.error = null;
     this.lastUpdated = null;
-    this.seenIds = new Set(JSON.parse(localStorage.getItem('acme_seen_ids') || '[]'));
+    this.resolvedIds = new Set(JSON.parse(localStorage.getItem('acme_resolved_ids') || '[]'));
     this.sendingIdx = null;
   }
 
-  saveSeenIds() {
-    localStorage.setItem('acme_seen_ids', JSON.stringify([...this.seenIds]));
+  saveResolvedIds() {
+    localStorage.setItem('acme_resolved_ids', JSON.stringify([...this.resolvedIds]));
   }
 
-  unseenCount(cat) {
+  unresolvedCount(cat) {
     const emails = this.byCategory[cat] || [];
-    return emails.filter(e => !this.seenIds.has(e.id)).length;
+    return emails.filter(e => !this.resolvedIds.has(e.id)).length;
   }
 
   async init() {
@@ -249,8 +249,6 @@ class ACME {
   openCategory(cat) {
     this.selectedCategory = cat;
     this.view = 'emails';
-    (this.byCategory[cat] || []).forEach(e => this.seenIds.add(e.id));
-    this.saveSeenIds();
     this.render();
   }
 
@@ -279,6 +277,8 @@ class ACME {
         throw new Error(errData.error || ('Invio fallito (status ' + res.status + ')'));
       }
       email.sentIdx = idx;
+      this.resolvedIds.add(email.id);
+      this.saveResolvedIds();
     } catch (e) {
       this.error = e.message;
     }
@@ -295,6 +295,11 @@ class ACME {
     if (this.view === 'detail') { this.view = 'emails'; this.selectedEmail = null; }
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
     this.render();
+  }
+
+  async reconnectGmail() {
+    await fetch('/api/logout');
+    this.loginWithGmail();
   }
 
   resetKey() {
@@ -334,7 +339,7 @@ class ACME {
 
   renderDashboard() {
     const cards = Object.entries(CATEGORY_META).map(([cat, meta]) => {
-      const count = this.unseenCount(cat);
+      const count = this.unresolvedCount(cat);
       return `
         <div class="card" onclick="app.openCategory('${cat}')">
           <div class="icon ${meta.color}">${meta.icon}</div>
@@ -355,19 +360,22 @@ class ACME {
         <div class="status">${updatedText}</div>
         <button class="icon-btn" onclick="app.loadEmails()">↻</button>
       </div>
-      <div class="settings-link"><a onclick="app.resetKey()">Cambia chiave API</a></div>`;
+      <div class="settings-link"><a onclick="app.resetKey()">Cambia chiave API</a> &nbsp;·&nbsp; <a onclick="app.reconnectGmail()">Riconnetti Gmail</a></div>`;
   }
 
   renderEmails() {
     const emails = this.byCategory[this.selectedCategory] || [];
     const meta = CATEGORY_META[this.selectedCategory];
-    const rows = emails.length ? emails.map(e => `
+    const rows = emails.length ? emails.map(e => {
+      const resolved = this.resolvedIds.has(e.id);
+      return `
         <div class="email-row" onclick='app.openEmail(${JSON.stringify(e).replace(/'/g, "&#39;")})'>
           <div class="from">${this.escape(e.from)}</div>
           <div class="subject">${this.escape(e.subject)}</div>
           <div class="preview">${this.escape(e.body)}</div>
-          <div class="ready-badge">● Risposte pronte</div>
-        </div>`).join('')
+          <div class="ready-badge" style="${resolved ? 'color: var(--text-secondary);' : ''}">${resolved ? '✓ Risolta' : '● Risposte pronte'}</div>
+        </div>`;
+    }).join('')
       : `<div class="empty">Nessuna email in questa categoria</div>`;
 
     return `
