@@ -83,16 +83,35 @@
   .email-row {
     background: var(--card);
     border-radius: 14px;
-    padding: 14px 16px;
+    padding: 14px 44px 14px 16px;
     margin-bottom: 10px;
     cursor: pointer;
     transition: transform 0.15s ease;
+    position: relative;
   }
   .email-row:active { transform: scale(0.98); }
   .email-row .from { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
   .email-row .subject { font-size: 14px; color: var(--text); margin-bottom: 4px; opacity: 0.85; }
   .email-row .preview { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .email-row .ready-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--green); font-weight: 600; margin-top: 6px; }
+  .dismiss-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(60,60,67,0.08);
+    color: var(--text-secondary);
+    border: none;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .dismiss-btn:active { background: rgba(60,60,67,0.16); }
 
   /* Detail view */
   .detail-card {
@@ -300,6 +319,17 @@ class ACME {
     this.render();
   }
 
+  dismissEmail(email) {
+    this.resolvedIds.add(email.id);
+    this.saveResolvedIds();
+    fetch('/api/mark-resolved', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emailId: email.id })
+    }).catch(() => {});
+    this.render();
+  }
+
   async reanalyzeEmail() {
     const email = this.selectedEmail;
     this.view = 'analyzing';
@@ -412,16 +442,18 @@ class ACME {
   }
 
   renderEmails() {
-    const emails = this.byCategory[this.selectedCategory] || [];
+    const allEmails = this.byCategory[this.selectedCategory] || [];
+    const emails = allEmails.filter(e => !this.resolvedIds.has(e.id) && !e.resolved);
     const meta = CATEGORY_META[this.selectedCategory];
     const rows = emails.length ? emails.map(e => {
-      const resolved = this.resolvedIds.has(e.id) || e.resolved;
+      const safeEmail = JSON.stringify(e).replace(/'/g, "&#39;");
       return `
-        <div class="email-row" onclick='app.openEmail(${JSON.stringify(e).replace(/'/g, "&#39;")})'>
+        <div class="email-row" onclick='app.openEmail(${safeEmail})'>
+          <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissEmail(${safeEmail})'>✕</button>
           <div class="from">${this.escape(e.from)}</div>
           <div class="subject">${this.escape(e.subject)}</div>
           <div class="preview">${this.escape(e.body)}</div>
-          <div class="ready-badge" style="${resolved ? 'color: var(--text-secondary);' : ''}">${resolved ? '✓ Risolta' : '● Risposte pronte'}</div>
+          <div class="ready-badge">● Risposte pronte</div>
         </div>`;
     }).join('')
       : `<div class="empty">Nessuna email in questa categoria</div>`;
