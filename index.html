@@ -144,9 +144,50 @@
   }
   .response-card .opt-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
   .response-card .body-text {
+    width: 100%;
+    font-family: inherit;
     font-size: 14px; line-height: 1.5; white-space: pre-wrap;
     background: var(--bg); border-radius: 10px; padding: 12px; margin-bottom: 12px;
+    border: 1px solid transparent;
+    resize: vertical;
+    min-height: 110px;
+    color: var(--text);
   }
+  .response-card .body-text:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--card);
+  }
+  .response-card .body-text:disabled {
+    opacity: 0.7;
+  }
+  .sent-confirm {
+    background: rgba(52,199,89,0.12); color: var(--green);
+    padding: 12px; border-radius: 10px; font-size: 13px; margin-top: 10px;
+  }
+  .sent-confirm a { color: var(--green); font-weight: 600; text-decoration: underline; }
+  .sent-confirm .pending { color: var(--text-secondary); font-weight: 500; }
+
+  .confirm-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+  .confirm-overlay.hidden { display: none; }
+  .confirm-box {
+    background: var(--card);
+    border-radius: 20px;
+    padding: 28px 24px;
+    max-width: 320px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  }
+  .confirm-box .icon { font-size: 42px; margin-bottom: 12px; }
+  .confirm-box h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .confirm-box p { font-size: 14px; color: var(--text-secondary); margin-bottom: 22px; line-height: 1.45; }
   .btn-row { display: flex; gap: 8px; }
   .btn {
     flex: 1; border: none; border-radius: 12px; padding: 11px;
@@ -193,6 +234,7 @@
 </head>
 <body>
   <div class="container" id="app"></div>
+  <div id="confirmOverlay" class="confirm-overlay hidden"></div>
 
 <script>
 const CATEGORY_META = {
@@ -308,9 +350,13 @@ class ACME {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || ('Invio fallito (status ' + res.status + ')'));
       }
+      const data = await res.json();
       email.sentIdx = idx;
+      email.sentThreadId = data.threadId || null;
+      email.sentConfirmed = !!data.confirmed;
       this.resolvedIds.add(email.id);
       this.saveResolvedIds();
+      this.showSendConfirmation(data.confirmed);
       fetch('/api/mark-resolved', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -321,6 +367,31 @@ class ACME {
     }
     this.sendingIdx = null;
     this.render();
+  }
+
+  showSendConfirmation(confirmed) {
+    const overlay = document.getElementById('confirmOverlay');
+    const icon = confirmed ? '✅' : '⚠️';
+    const title = confirmed ? 'Email inviata e confermata' : 'Email inviata';
+    const desc = confirmed
+      ? 'Verificato direttamente su Gmail: il messaggio risulta davvero nella posta inviata.'
+      : 'Il messaggio è stato inviato, ma la verifica automatica su Gmail non è riuscita in questo momento. Puoi controllare manualmente se vuoi esserne certo.';
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">${icon}</div>
+        <h3>${title}</h3>
+        <p>${desc}</p>
+        <button class="btn btn-primary" onclick="app.closeConfirmModal()">OK</button>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  closeConfirmModal() {
+    document.getElementById('confirmOverlay').classList.add('hidden');
+  }
+
+  updateResponseText(idx, value) {
+    this.selectedEmail.responses[idx] = value;
   }
 
   dismissEmail(email) {
@@ -479,7 +550,7 @@ class ACME {
       return `
         <div class="response-card">
           <div class="opt-label">OPZIONE ${idx + 1}</div>
-          <div class="body-text">${this.escape(r)}</div>
+          <textarea class="body-text" ${sent || sending ? 'disabled' : ''} oninput="app.updateResponseText(${idx}, this.value)">${this.escape(r)}</textarea>
           <div class="btn-row">
             <button class="btn btn-send ${sent ? 'sent' : ''}" ${sending ? 'disabled' : ''} onclick="app.sendResponse(${idx})">${sending ? 'Invio…' : (sent ? '✓ Inviata' : 'Invia')}</button>
             <button class="btn btn-reject" ${sending ? 'disabled' : ''} onclick="app.rejectResponse(${idx})">Scarta</button>
