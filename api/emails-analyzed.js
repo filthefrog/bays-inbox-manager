@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   try {
     const listResponse = await fetch(
-      "https://www.googleapis.com/gmail/v1/users/me/messages?q=is:inbox&maxResults=8",
+      "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me") + "&maxResults=8",
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
