@@ -142,7 +142,17 @@
     padding: 16px;
     margin-bottom: 12px;
   }
-  .response-card .opt-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+  .response-card .opt-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .opt-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .opt-dot.green { background: var(--green); }
+  .opt-dot.orange { background: var(--orange); }
+  .opt-dot.red { background: var(--red); }
+  .opt-dot.gray { background: var(--text-secondary); }
+  .discrepancy-banner {
+    background: rgba(255,149,0,0.12); color: var(--orange);
+    padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 16px; line-height: 1.45;
+  }
+  .discrepancy-banner b { font-weight: 700; }
   .response-card .body-text {
     width: 100%;
     font-family: inherit;
@@ -334,7 +344,8 @@ class ACME {
 
   async sendResponse(idx) {
     const email = this.selectedEmail;
-    const resp = email.responses[idx];
+    const respItem = email.responses[idx];
+    const resp = (respItem && typeof respItem === 'object') ? respItem.text : respItem;
     const to = (email.from.match(/[\w.-]+@[\w.-]+\.\w+/) || [])[0] || '';
     const subject = 'RE: ' + email.subject;
     this.sendingIdx = idx;
@@ -391,7 +402,12 @@ class ACME {
   }
 
   updateResponseText(idx, value) {
-    this.selectedEmail.responses[idx] = value;
+    const r = this.selectedEmail.responses[idx];
+    if (r && typeof r === 'object') {
+      r.text = value;
+    } else {
+      this.selectedEmail.responses[idx] = value;
+    }
   }
 
   dismissEmail(email) {
@@ -426,6 +442,7 @@ class ACME {
       const data = await res.json();
       email.category = data.category;
       email.tone = data.tone;
+      email.discrepancy = data.discrepancy || null;
       email.responses = data.responses;
       email.analysisError = false;
       Object.keys(this.byCategory).forEach(cat => {
@@ -545,12 +562,16 @@ class ACME {
     const e = this.selectedEmail;
     const toneClass = (e.tone || '').toLowerCase();
     const responses = (e.responses || []).map((r, idx) => {
+      const isObj = r && typeof r === 'object';
+      const text = isObj ? r.text : r;
+      const label = isObj ? r.label : ('Opzione ' + (idx + 1));
+      const color = isObj ? r.color : 'gray';
       const sent = e.sentIdx === idx;
       const sending = this.sendingIdx === idx;
       return `
         <div class="response-card">
-          <div class="opt-label">OPZIONE ${idx + 1}</div>
-          <textarea class="body-text" ${sent || sending ? 'disabled' : ''} oninput="app.updateResponseText(${idx}, this.value)">${this.escape(r)}</textarea>
+          <div class="opt-label"><span class="opt-dot ${color}"></span>${label}</div>
+          <textarea class="body-text" ${sent || sending ? 'disabled' : ''} oninput="app.updateResponseText(${idx}, this.value)">${this.escape(text)}</textarea>
           <div class="btn-row">
             <button class="btn btn-send ${sent ? 'sent' : ''}" ${sending ? 'disabled' : ''} onclick="app.sendResponse(${idx})">${sending ? 'Invio…' : (sent ? '✓ Inviata' : 'Invia')}</button>
             <button class="btn btn-reject" ${sending ? 'disabled' : ''} onclick="app.rejectResponse(${idx})">Scarta</button>
@@ -563,6 +584,7 @@ class ACME {
         <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
       </div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      ${e.discrepancy ? `<div class="discrepancy-banner">⚠️ <b>Possibile incongruenza:</b> ${this.escape(e.discrepancy)}</div>` : ''}
       ${e.analysisError ? `<div class="error-banner">Analisi non riuscita per questa email.<br><button class="btn btn-primary" style="margin-top:10px;" onclick="app.reanalyzeEmail()">↻ Rianalizza</button></div>` : ''}
       <div class="detail-card">
         <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
