@@ -207,11 +207,11 @@ function extractBody(payload) {
   if (payload.parts) {
     const textPart = payload.parts.find(p => p.mimeType === "text/plain");
     if (textPart && textPart.body.data) {
-      return Buffer.from(textPart.body.data, "base64").toString("utf-8").slice(0, 300);
+      return Buffer.from(textPart.body.data, "base64").toString("utf-8").slice(0, 3000);
     }
   }
   if (payload.body.data) {
-    return Buffer.from(payload.body.data, "base64").toString("utf-8").slice(0, 300);
+    return Buffer.from(payload.body.data, "base64").toString("utf-8").slice(0, 3000);
   }
   return "(No body)";
 }
