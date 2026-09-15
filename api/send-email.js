@@ -46,7 +46,8 @@ export default async function handler(req, res) {
     );
 
     if (!sendResponse.ok) {
-      throw new Error('Failed to send email');
+      const detail = await sendResponse.text();
+      throw new Error(`Gmail send error (${sendResponse.status}): ${detail.slice(0, 200)}`);
     }
 
     const result = await sendResponse.json();
