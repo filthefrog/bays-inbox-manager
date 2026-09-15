@@ -33,23 +33,20 @@ export default async function handler(req, res) {
       throw new Error(tokenData.error_description || "Failed to get token");
     }
 
-    // Imposta il token in un cookie httpOnly
-    res.setHeader(
-      "Set-Cookie",
+    // Imposta entrambi i cookie in un'unica chiamata (altrimenti si sovrascrivono)
+    const cookies = [
       `gmail_token=${tokenData.access_token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
-    );
-
-    // Salva anche il refresh token se disponibile
+    ];
     if (tokenData.refresh_token) {
-      // In produzione, dovresti salvare questo in un DB sicuro
-      res.setHeader(
-        "Set-Cookie",
+      cookies.push(
         `gmail_refresh=${tokenData.refresh_token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`
       );
     }
+    res.setHeader("Set-Cookie", cookies);
 
-    // Reindirizza alla dashboard
-    return res.redirect("/");
+    // Reindirizza alla dashboard, includendo temporaneamente lo scope ottenuto per debug
+    const debugScope = encodeURIComponent(tokenData.scope || 'nessuno scope restituito');
+    return res.redirect(`/?debug_scope=${debugScope}`);
   } catch (error) {
     console.error("Error:", error);
     return res.status(500).json({ error: error.message });
