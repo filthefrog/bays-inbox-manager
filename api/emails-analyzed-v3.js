@@ -1,6 +1,5 @@
 export default async function handler(req, res) {
   const token = req.cookies.gmail_token;
-
   if (!token) {
     return res.status(401).json({ error: "Not authenticated" });
   }
@@ -9,6 +8,10 @@ export default async function handler(req, res) {
   if (!apiKey) {
     return res.status(400).json({ error: "Claude API key required" });
   }
+
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+  const hasCache = !!(SUPABASE_URL && SUPABASE_KEY);
 
   try {
     const listResponse = await fetch(
@@ -30,6 +33,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ byCategory: {}, totalEmails: 0 });
     }
 
+    // Fetch dettagli email da Gmail
     const detailResults = await Promise.allSettled(
       messageIds.map(async (msg) => {
         const detailResponse = await fetch(
@@ -52,20 +56,77 @@ export default async function handler(req, res) {
       .filter(r => r.status === 'fulfilled')
       .map(r => r.value);
 
-    const analyzedResults = await Promise.allSettled(
-      emails.map(email => analyzeAndRespond(email, apiKey))
+    // Controlla quali email sono già in cache
+    let cached = {};
+    if (hasCache) {
+      const ids = emails.map(e => e.id).join(',');
+      const cacheResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/analyzed_emails?id=in.(${ids})&select=*`,
+        {
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`
+          }
+        }
+      );
+      if (cacheResp.ok) {
+        const rows = await cacheResp.json();
+        rows.forEach(row => { cached[row.id] = row; });
+      }
+    }
+
+    // Analizza solo le email NON in cache
+    const toAnalyze = emails.filter(e => !cached[e.id]);
+    const newlyAnalyzed = await Promise.allSettled(
+      toAnalyze.map(email => analyzeAndRespond(email, apiKey))
     );
 
-    const analyzedEmails = analyzedResults.map((r, i) => {
-      if (r.status === 'fulfilled') return r.value;
-      // Fallback: keep email visible even if Claude analysis failed
-      return {
-        ...emails[i],
-        category: "Richiesta informazioni",
-        tone: "Neutro",
-        responses: ["Analisi non riuscita, riprova dalla scheda email."],
-        analysisError: true
-      };
+    const newResults = {};
+    toAnalyze.forEach((email, i) => {
+      const r = newlyAnalyzed[i];
+      if (r.status === 'fulfilled') {
+        newResults[email.id] = { ...r.value, id: email.id, resolved: false };
+      } else {
+        newResults[email.id] = {
+          id: email.id,
+          category: "Richiesta informazioni",
+          tone: "Neutro",
+          responses: ["Analisi non riuscita: " + (r.reason?.message || 'motivo sconosciuto')],
+          analysisError: true,
+          resolved: false
+        };
+      }
+    });
+
+    // Salva le nuove analisi in cache (solo quelle riuscite)
+    if (hasCache) {
+      const toSave = Object.entries(newResults)
+        .filter(([id, v]) => !v.analysisError)
+        .map(([id, v]) => ({
+          id,
+          category: v.category,
+          tone: v.tone,
+          responses: v.responses,
+          resolved: false
+        }));
+      if (toSave.length > 0) {
+        await fetch(`${SUPABASE_URL}/rest/v1/analyzed_emails`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify(toSave)
+        }).catch(() => {}); // non bloccare la risposta se il salvataggio fallisce
+      }
+    }
+
+    // Combina: email con dettagli freschi da Gmail + categoria/risposte da cache o nuove
+    const analyzedEmails = emails.map(email => {
+      const analysis = cached[email.id] || newResults[email.id];
+      return { ...email, ...analysis };
     });
 
     const byCategory = {};
@@ -77,7 +138,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       byCategory,
       totalEmails: analyzedEmails.length,
-      failedCount: analyzedResults.filter(r => r.status === 'rejected').length
+      fromCache: Object.keys(cached).length,
+      newlyAnalyzed: toAnalyze.length,
+      cacheEnabled: hasCache
     });
 
   } catch (error) {
@@ -130,7 +193,6 @@ Rispondi SOLO con JSON:
   const parsed = JSON.parse(jsonMatch[0]);
 
   return {
-    ...email,
     category: parsed.category || "Richiesta informazioni",
     tone: parsed.tone || "Neutro",
     responses: [
