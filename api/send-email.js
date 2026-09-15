@@ -1,13 +1,23 @@
 import { Buffer } from 'buffer';
+import { getFreshAccessToken } from '../lib/gmail-token.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const token = req.cookies.gmail_token;
-  if (!token) {
+  const refreshToken = req.cookies.gmail_refresh;
+  if (!refreshToken) {
     return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  let token;
+  try {
+    token = await getFreshAccessToken(refreshToken);
+  } catch (err) {
+    return res.status(401).json({
+      error: err.code === "REFRESH_EXPIRED" ? "Sessione scaduta, riconnetti Gmail" : "Errore nel rinnovo del token Gmail"
+    });
   }
 
   const { to, subject, body } = req.body;
