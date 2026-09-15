@@ -131,6 +131,7 @@
     transition: opacity 0.15s;
   }
   .btn:active { opacity: 0.7; }
+  .btn:disabled { opacity: 0.4; }
   .btn-send { background: var(--green); color: white; }
   .btn-send.sent { background: rgba(52,199,89,0.15); color: var(--green); }
   .btn-reject { background: rgba(255,59,48,0.1); color: var(--red); }
@@ -189,6 +190,17 @@ class ACME {
     this.selectedEmail = null;
     this.error = null;
     this.lastUpdated = null;
+    this.seenIds = new Set(JSON.parse(localStorage.getItem('acme_seen_ids') || '[]'));
+    this.sendingIdx = null;
+  }
+
+  saveSeenIds() {
+    localStorage.setItem('acme_seen_ids', JSON.stringify([...this.seenIds]));
+  }
+
+  unseenCount(cat) {
+    const emails = this.byCategory[cat] || [];
+    return emails.filter(e => !this.seenIds.has(e.id)).length;
   }
 
   async init() {
@@ -237,6 +249,8 @@ class ACME {
   openCategory(cat) {
     this.selectedCategory = cat;
     this.view = 'emails';
+    (this.byCategory[cat] || []).forEach(e => this.seenIds.add(e.id));
+    this.saveSeenIds();
     this.render();
   }
 
@@ -251,19 +265,25 @@ class ACME {
     const resp = email.responses[idx];
     const to = (email.from.match(/[\w.-]+@[\w.-]+\.\w+/) || [])[0] || '';
     const subject = 'RE: ' + email.subject;
+    this.sendingIdx = idx;
+    this.error = null;
+    this.render();
     try {
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to, subject, body: resp })
       });
-      if (!res.ok) throw new Error('Invio fallito');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || ('Invio fallito (status ' + res.status + ')'));
+      }
       email.sentIdx = idx;
-      this.render();
     } catch (e) {
       this.error = e.message;
-      this.render();
     }
+    this.sendingIdx = null;
+    this.render();
   }
 
   rejectResponse(idx) {
@@ -314,7 +334,7 @@ class ACME {
 
   renderDashboard() {
     const cards = Object.entries(CATEGORY_META).map(([cat, meta]) => {
-      const count = (this.byCategory[cat] || []).length;
+      const count = this.unseenCount(cat);
       return `
         <div class="card" onclick="app.openCategory('${cat}')">
           <div class="icon ${meta.color}">${meta.icon}</div>
@@ -363,13 +383,14 @@ class ACME {
     const toneClass = (e.tone || '').toLowerCase();
     const responses = (e.responses || []).map((r, idx) => {
       const sent = e.sentIdx === idx;
+      const sending = this.sendingIdx === idx;
       return `
         <div class="response-card">
           <div class="opt-label">OPZIONE ${idx + 1}</div>
           <div class="body-text">${this.escape(r)}</div>
           <div class="btn-row">
-            <button class="btn btn-send ${sent ? 'sent' : ''}" onclick="app.sendResponse(${idx})">${sent ? '✓ Inviata' : 'Invia'}</button>
-            <button class="btn btn-reject" onclick="app.rejectResponse(${idx})">Scarta</button>
+            <button class="btn btn-send ${sent ? 'sent' : ''}" ${sending ? 'disabled' : ''} onclick="app.sendResponse(${idx})">${sending ? 'Invio…' : (sent ? '✓ Inviata' : 'Invia')}</button>
+            <button class="btn btn-reject" ${sending ? 'disabled' : ''} onclick="app.rejectResponse(${idx})">Scarta</button>
           </div>
         </div>`;
     }).join('');
@@ -378,6 +399,7 @@ class ACME {
       <div class="list-header">
         <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
       </div>
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
       <div class="detail-card">
         <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
         <div class="detail-row"><span class="label">Oggetto</span>${this.escape(e.subject)}</div>
