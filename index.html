@@ -204,9 +204,18 @@ class ACME {
   }
 
   async init() {
+    const params = new URLSearchParams(window.location.search);
+    const debugScope = params.get('debug_scope');
+    if (debugScope) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     const key = localStorage.getItem('claude_api_key');
     if (!key) { this.view = 'setup'; this.render(); return; }
     await this.loadEmails();
+    if (debugScope) {
+      this.error = 'DEBUG scope ricevuto da Google: ' + decodeURIComponent(debugScope);
+      this.render();
+    }
   }
 
   saveKey() {
