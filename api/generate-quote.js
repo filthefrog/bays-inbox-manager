@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import { getFreshAccessToken } from '../lib/gmail-token.js';
-import { calculateQuote } from '../lib/pricing.js';
+import { buildQuoteTotals } from '../lib/pricing.js';
 import { buildQuotePdf } from '../lib/quote-pdf.js';
 
 function wrapBase64(str) {
@@ -26,15 +26,15 @@ export default async function handler(req, res) {
     });
   }
 
-  const { to, guestName, checkIn, checkOut } = req.body;
+  const { to, guestName, checkIn, checkOut, ratePerNight, discountPercent } = req.body;
 
-  if (!to || !guestName || !checkIn || !checkOut) {
-    return res.status(400).json({ error: 'Dati mancanti: destinatario, nome ospite, check-in e check-out sono obbligatori' });
+  if (!to || !guestName || !checkIn || !checkOut || !ratePerNight) {
+    return res.status(400).json({ error: 'Dati mancanti: destinatario, nome ospite, date e tariffa sono obbligatori' });
   }
 
   let quote;
   try {
-    quote = calculateQuote(checkIn, checkOut);
+    quote = buildQuoteTotals({ checkIn, checkOut, ratePerNight, discountPercent });
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
