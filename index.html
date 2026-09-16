@@ -323,7 +323,7 @@ class ACME {
     return {
       open: false, checkIn: '', checkOut: '', guestName: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
-      emailMessage: '', messageTouched: false,
+      emailMessage: '', messageTouched: false, generatingMessage: false,
       sending: false, sent: false
     };
   }
@@ -574,6 +574,63 @@ Domus 106`;
     } catch (err) {
       previewEl.innerHTML = `<div class="detail-row" style="color:var(--red)">${this.escape(err.message)}</div>`;
     }
+  }
+
+  async generateQuoteMessageWithAI() {
+    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = this.quoteState;
+    if (!guestName || !checkIn || !checkOut || !ratePerNight) {
+      this.error = 'Compila nome ospite, date e tariffa prima di generare il messaggio';
+      this.render();
+      return;
+    }
+    let nights, subtotal, discountAmount, total;
+    try {
+      nights = this.computeNightsPreview(checkIn, checkOut);
+    } catch (e) {
+      this.error = e.message;
+      this.render();
+      return;
+    }
+    const rate = parseFloat(ratePerNight) || 0;
+    const discount = parseFloat(discountPercent) || 0;
+    subtotal = nights * rate;
+    discountAmount = Math.round(subtotal * discount) / 100;
+    total = subtotal - discountAmount;
+
+    this.quoteState.generatingMessage = true;
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/generate-quote-message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-claude-key': localStorage.getItem('claude_api_key')
+        },
+        body: JSON.stringify({
+          originalSubject: this.selectedEmail.subject,
+          originalBody: this.selectedEmail.body,
+          guestName,
+          checkInFmt: this.formatQuoteDate(checkIn),
+          checkOutFmt: this.formatQuoteDate(checkOut),
+          nights,
+          ratePerNight: rate,
+          discountPercent: discount,
+          total: total.toFixed(2),
+          season: this.suggestRatePreview(checkIn) === 150 ? 'Alta stagione' : 'Bassa stagione'
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('Generazione fallita (status ' + res.status + ')'));
+      this.quoteState.emailMessage = data.message;
+      this.quoteState.messageTouched = true;
+      const msgEl = document.getElementById('quoteMessage');
+      if (msgEl) msgEl.value = data.message;
+    } catch (e) {
+      this.error = e.message;
+    }
+    this.quoteState.generatingMessage = false;
+    this.render();
   }
 
   async sendQuote() {
@@ -867,7 +924,10 @@ Domus 106`;
           </div>
           <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
           <div class="quote-preview" id="quotePreview"></div>
-          <span class="form-label">Messaggio email di accompagnamento</span>
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+            <span class="form-label" style="margin-bottom:0;">Messaggio email di accompagnamento</span>
+            <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI()">✨ ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
+          </div>
           <textarea id="quoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('emailMessage', this.value)">${this.escape(this.quoteState.emailMessage)}</textarea>
           <div class="btn-row">
             <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote()">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
