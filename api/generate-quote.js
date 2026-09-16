@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const { to, guestName, checkIn, checkOut, ratePerNight, discountPercent } = req.body;
+  const { to, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage } = req.body;
 
   if (!to || !guestName || !checkIn || !checkOut || !ratePerNight) {
     return res.status(400).json({ error: 'Dati mancanti: destinatario, nome ospite, date e tariffa sono obbligatori' });
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
 
     const pdfBuffer = await buildQuotePdf({ guestName, checkIn: checkInFmt, checkOut: checkOutFmt, quote, issuedDate });
 
-    const emailText = `Gentile ${guestName},
+    const emailText = (emailMessage && emailMessage.trim()) ? emailMessage : `Gentile ${guestName},
 
 in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${quote.nights} nott${quote.nights === 1 ? 'e' : 'i'}).
 
