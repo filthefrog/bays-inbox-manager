@@ -320,7 +320,11 @@ class ACME {
   }
 
   emptyQuoteState() {
-    return { open: false, checkIn: '', checkOut: '', guestName: '', sending: false, sent: false };
+    return {
+      open: false, checkIn: '', checkOut: '', guestName: '',
+      ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
+      sending: false, sent: false
+    };
   }
 
   saveResolvedIds() {
@@ -476,48 +480,68 @@ class ACME {
 
   updateQuoteField(field, value) {
     this.quoteState[field] = value;
+    if (field === 'ratePerNight') this.quoteState.rateTouched = true;
+    if (field === 'discountPercent') this.quoteState.discountTouched = true;
+    if (field === 'checkIn' || field === 'checkOut') this.applySuggestedDefaults();
     this.refreshQuotePreview();
   }
 
-  calculateQuotePreview(checkInStr, checkOutStr) {
+  computeNightsPreview(checkInStr, checkOutStr) {
     const checkIn = new Date(checkInStr + 'T00:00:00');
     const checkOut = new Date(checkOutStr + 'T00:00:00');
     const nights = Math.round((checkOut - checkIn) / 86400000);
     if (!(nights > 0)) throw new Error('Il check-out deve essere dopo il check-in');
+    return nights;
+  }
+
+  suggestRatePreview(checkInStr) {
+    const checkIn = new Date(checkInStr + 'T00:00:00');
     const month = checkIn.getMonth() + 1;
-    const isAlta = month >= 6 && month <= 9;
-    const ratePerNight = isAlta ? 150 : 80;
-    let discountPercent = 0;
-    if (nights >= 30) discountPercent = 30;
-    else if (nights >= 7) discountPercent = 15;
-    const subtotal = nights * ratePerNight;
-    const discountAmount = Math.round(subtotal * discountPercent) / 100;
-    const total = subtotal - discountAmount;
-    return { nights, ratePerNight, season: isAlta ? 'Alta stagione' : 'Bassa stagione', subtotal, discountPercent, discountAmount, total };
+    return (month >= 6 && month <= 9) ? 150 : 80;
+  }
+
+  applySuggestedDefaults() {
+    const { checkIn, checkOut } = this.quoteState;
+    if (!checkIn || !checkOut) return;
+    try {
+      const nights = this.computeNightsPreview(checkIn, checkOut);
+      if (!this.quoteState.rateTouched) {
+        this.quoteState.ratePerNight = String(this.suggestRatePreview(checkIn));
+      }
+      if (!this.quoteState.discountTouched) {
+        this.quoteState.discountPercent = String(nights >= 30 ? 30 : (nights >= 7 ? 15 : 0));
+      }
+    } catch (e) {
+      // date non ancora valide insieme, non facciamo nulla
+    }
   }
 
   refreshQuotePreview() {
     const previewEl = document.getElementById('quotePreview');
     if (!previewEl) return;
-    const { checkIn, checkOut } = this.quoteState;
-    if (!checkIn || !checkOut) { previewEl.innerHTML = ''; return; }
+    const { checkIn, checkOut, ratePerNight, discountPercent } = this.quoteState;
+    if (!checkIn || !checkOut || !ratePerNight) { previewEl.innerHTML = ''; return; }
     try {
-      const q = this.calculateQuotePreview(checkIn, checkOut);
+      const nights = this.computeNightsPreview(checkIn, checkOut);
+      const rate = parseFloat(ratePerNight) || 0;
+      const discount = parseFloat(discountPercent) || 0;
+      const subtotal = nights * rate;
+      const discountAmount = Math.round(subtotal * discount) / 100;
+      const total = subtotal - discountAmount;
       previewEl.innerHTML = `
-        <div class="detail-row"><span class="label">Notti</span>${q.nights}</div>
-        <div class="detail-row"><span class="label">Stagione</span>${q.season}</div>
-        <div class="detail-row"><span class="label">Tariffa</span>€ ${q.ratePerNight.toFixed(2)}/notte</div>
-        ${q.discountPercent > 0 ? `<div class="detail-row"><span class="label">Sconto</span>${q.discountPercent}% (− € ${q.discountAmount.toFixed(2)})</div>` : ''}
-        <div class="detail-row" style="font-weight:700; font-size:16px; margin-top:8px;"><span class="label">Totale</span>€ ${q.total.toFixed(2)}</div>`;
+        <div class="detail-row"><span class="label">Notti</span>${nights}</div>
+        <div class="detail-row"><span class="label">Subtotale</span>€ ${subtotal.toFixed(2)}</div>
+        ${discount > 0 ? `<div class="detail-row"><span class="label">Sconto (${discount}%)</span>− € ${discountAmount.toFixed(2)}</div>` : ''}
+        <div class="detail-row" style="font-weight:700; font-size:16px; margin-top:8px;"><span class="label">Totale</span>€ ${total.toFixed(2)}</div>`;
     } catch (err) {
       previewEl.innerHTML = `<div class="detail-row" style="color:var(--red)">${this.escape(err.message)}</div>`;
     }
   }
 
   async sendQuote() {
-    const { checkIn, checkOut, guestName } = this.quoteState;
-    if (!checkIn || !checkOut || !guestName.trim()) {
-      this.error = 'Compila nome ospite, check-in e check-out prima di inviare';
+    const { checkIn, checkOut, guestName, ratePerNight, discountPercent } = this.quoteState;
+    if (!checkIn || !checkOut || !guestName.trim() || !ratePerNight) {
+      this.error = 'Compila nome ospite, date e tariffa prima di inviare';
       this.render();
       return;
     }
@@ -529,7 +553,7 @@ class ACME {
       const res = await fetch('/api/generate-quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, guestName, checkIn, checkOut })
+        body: JSON.stringify({ to, guestName, checkIn, checkOut, ratePerNight, discountPercent })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -802,6 +826,17 @@ class ACME {
               <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('checkOut', this.value)">
             </div>
           </div>
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1;">
+              <span class="form-label">Tariffa/notte (€)</span>
+              <input type="number" step="0.01" class="form-input" value="${this.quoteState.ratePerNight}" oninput="app.updateQuoteField('ratePerNight', this.value)">
+            </div>
+            <div style="flex:1;">
+              <span class="form-label">Sconto (%)</span>
+              <input type="number" step="1" min="0" max="100" class="form-input" value="${this.quoteState.discountPercent}" oninput="app.updateQuoteField('discountPercent', this.value)">
+            </div>
+          </div>
+          <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
           <div class="quote-preview" id="quotePreview"></div>
           <div class="btn-row">
             <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote()">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
