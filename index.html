@@ -323,6 +323,7 @@ class ACME {
     return {
       open: false, checkIn: '', checkOut: '', guestName: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
+      emailMessage: '', messageTouched: false,
       sending: false, sent: false
     };
   }
@@ -482,8 +483,45 @@ class ACME {
     this.quoteState[field] = value;
     if (field === 'ratePerNight') this.quoteState.rateTouched = true;
     if (field === 'discountPercent') this.quoteState.discountTouched = true;
+    if (field === 'emailMessage') this.quoteState.messageTouched = true;
     if (field === 'checkIn' || field === 'checkOut') this.applySuggestedDefaults();
+    if (field !== 'emailMessage' && !this.quoteState.messageTouched) {
+      this.quoteState.emailMessage = this.buildDefaultQuoteMessage();
+      const msgEl = document.getElementById('quoteMessage');
+      if (msgEl) msgEl.value = this.quoteState.emailMessage;
+    }
     this.refreshQuotePreview();
+  }
+
+  formatQuoteDate(isoDateStr) {
+    if (!isoDateStr) return '';
+    const d = new Date(isoDateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+  }
+
+  buildDefaultQuoteMessage() {
+    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = this.quoteState;
+    if (!checkIn || !checkOut || !guestName || !ratePerNight) return '';
+    let nights;
+    try { nights = this.computeNightsPreview(checkIn, checkOut); } catch (e) { return ''; }
+    const rate = parseFloat(ratePerNight) || 0;
+    const discount = parseFloat(discountPercent) || 0;
+    const subtotal = nights * rate;
+    const discountAmount = Math.round(subtotal * discount) / 100;
+    const total = subtotal - discountAmount;
+    const checkInFmt = this.formatQuoteDate(checkIn);
+    const checkOutFmt = this.formatQuoteDate(checkOut);
+    return `Gentile ${guestName},
+
+in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${nights} nott${nights === 1 ? 'e' : 'i'}).
+
+Totale soggiorno: € ${total.toFixed(2)}${discount > 0 ? ` (sconto ${discount}% per soggiorni lunghi già applicato)` : ''}
+
+Resto a disposizione per qualsiasi chiarimento.
+
+Cordiali saluti,
+Domus 106`;
   }
 
   computeNightsPreview(checkInStr, checkOutStr) {
@@ -539,7 +577,7 @@ class ACME {
   }
 
   async sendQuote() {
-    const { checkIn, checkOut, guestName, ratePerNight, discountPercent } = this.quoteState;
+    const { checkIn, checkOut, guestName, ratePerNight, discountPercent, emailMessage } = this.quoteState;
     if (!checkIn || !checkOut || !guestName.trim() || !ratePerNight) {
       this.error = 'Compila nome ospite, date e tariffa prima di inviare';
       this.render();
@@ -553,7 +591,7 @@ class ACME {
       const res = await fetch('/api/generate-quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, guestName, checkIn, checkOut, ratePerNight, discountPercent })
+        body: JSON.stringify({ to, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -791,25 +829,16 @@ class ACME {
         </div>`;
     }).join('');
 
-    return `
-      <div class="list-header">
-        <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
-      </div>
-      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
-      ${e.discrepancy ? `<div class="discrepancy-banner">⚠️ <b>Possibile incongruenza:</b> ${this.escape(e.discrepancy)}</div>` : ''}
-      ${e.analysisError ? `<div class="error-banner">Analisi non riuscita per questa email.<br><button class="btn btn-primary" style="margin-top:10px;" onclick="app.reanalyzeEmail()">↻ Rianalizza</button></div>` : ''}
+    const quoteOpen = this.quoteState.open;
+
+    const quoteHeader = quoteOpen
+      ? `<div class="back" onclick="app.toggleQuoteForm()">‹ Preventivo</div>`
+      : `<div class="section-title">Preventivo</div>`;
+
+    const quoteSection = `
+      ${quoteHeader}
       <div class="detail-card">
-        <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
-        <div class="detail-row"><span class="label">Oggetto</span>${this.escape(e.subject)}</div>
-        <div class="detail-row"><span class="label">Ricevuta</span>${this.formatDate(e.date, true)}</div>
-        <div class="pill-row">
-          <span class="pill">${e.category}</span>
-          <span class="pill tone-${toneClass}">${e.tone}</span>
-        </div>
-      </div>
-      <div class="section-title">Preventivo</div>
-      <div class="detail-card">
-        ${!this.quoteState.open ? `
+        ${!quoteOpen ? `
           <button class="btn btn-primary" onclick="app.toggleQuoteForm()">📄 Formula preventivo</button>
         ` : this.quoteState.sent ? `
           <div class="sent-confirm">✓ Preventivo inviato a ${this.escape(this.quoteState.guestName)}</div>
@@ -838,18 +867,42 @@ class ACME {
           </div>
           <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
           <div class="quote-preview" id="quotePreview"></div>
+          <span class="form-label">Messaggio email di accompagnamento</span>
+          <textarea id="quoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('emailMessage', this.value)">${this.escape(this.quoteState.emailMessage)}</textarea>
           <div class="btn-row">
             <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote()">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
             <button class="btn btn-reject" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.toggleQuoteForm()">Annulla</button>
           </div>
         `}
-      </div>
+      </div>`;
+
+    const originalMessageSection = `
       <div class="section-title">Messaggio originale</div>
       <div class="detail-card">
         <div class="original-text">${this.escape(e.body)}</div>
-      </div>
+      </div>`;
+
+    const responsesSection = `
       <div class="section-title">Risposte suggerite</div>
       ${responses}`;
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
+      </div>
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      ${e.discrepancy ? `<div class="discrepancy-banner">⚠️ <b>Possibile incongruenza:</b> ${this.escape(e.discrepancy)}</div>` : ''}
+      ${e.analysisError ? `<div class="error-banner">Analisi non riuscita per questa email.<br><button class="btn btn-primary" style="margin-top:10px;" onclick="app.reanalyzeEmail()">↻ Rianalizza</button></div>` : ''}
+      <div class="detail-card">
+        <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
+        <div class="detail-row"><span class="label">Oggetto</span>${this.escape(e.subject)}</div>
+        <div class="detail-row"><span class="label">Ricevuta</span>${this.formatDate(e.date, true)}</div>
+        <div class="pill-row">
+          <span class="pill">${e.category}</span>
+          <span class="pill tone-${toneClass}">${e.tone}</span>
+        </div>
+      </div>
+      ${quoteOpen ? originalMessageSection + quoteSection : quoteSection + originalMessageSection + responsesSection}`;
   }
 
   formatDate(dateStr, full) {
