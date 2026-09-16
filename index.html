@@ -67,7 +67,8 @@
   .card .count.zero { color: var(--text-secondary); }
 
   .hero-card {
-    background: rgba(255,59,48,0.08);
+    background: var(--card);
+    border: 1px solid rgba(60,60,67,0.06);
     border-radius: var(--radius-lg);
     padding: 20px;
     display: flex;
@@ -75,21 +76,26 @@
     gap: 16px;
     margin-bottom: 12px;
     cursor: pointer;
-    transition: transform 0.15s ease;
-    box-shadow: 0 4px 16px rgba(255,59,48,0.08);
+    transition: transform 0.15s ease, background 0.15s ease;
   }
   .hero-card:active { transform: scale(0.98); }
   .hero-card .hero-icon {
     width: 52px; height: 52px; flex-shrink: 0;
     border-radius: var(--radius-sm);
-    background: rgba(255,59,48,0.14);
+    background: rgba(142,142,147,0.12);
     display: flex; align-items: center; justify-content: center;
     font-size: 24px;
   }
   .hero-card .hero-text { flex: 1; }
   .hero-card .name { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
-  .hero-card .count { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; color: var(--red); }
-  .hero-card .count.zero { color: var(--text-secondary); }
+  .hero-card .count { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-secondary); }
+  .hero-card.has-items {
+    background: rgba(255,59,48,0.08);
+    border-color: transparent;
+    box-shadow: 0 4px 16px rgba(255,59,48,0.08);
+  }
+  .hero-card.has-items .hero-icon { background: rgba(255,59,48,0.14); }
+  .hero-card.has-items .count { color: var(--red); }
 
   .icon.red { background: rgba(255,59,48,0.12); }
   .icon.blue { background: rgba(10,110,189,0.12); }
@@ -268,6 +274,13 @@
     width: 100%; padding: 14px; border-radius: var(--radius-md); border: 1px solid var(--border);
     font-size: 15px; font-family: monospace; margin-bottom: 12px; background: var(--card);
   }
+  .form-input {
+    width: 100%; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); margin-bottom: 10px;
+  }
+  .form-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; display: block; }
+  .quote-preview { background: var(--bg); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; }
+  .quote-preview .detail-row:last-child { margin-bottom: 0; }
 
   .error-banner {
     background: rgba(255,59,48,0.1); color: var(--red);
@@ -303,6 +316,11 @@ class ACME {
     this.lastUpdated = null;
     this.resolvedIds = new Set(JSON.parse(localStorage.getItem('acme_resolved_ids') || '[]'));
     this.sendingIdx = null;
+    this.quoteState = this.emptyQuoteState();
+  }
+
+  emptyQuoteState() {
+    return { open: false, checkIn: '', checkOut: '', guestName: '', sending: false, sent: false };
   }
 
   saveResolvedIds() {
@@ -374,6 +392,7 @@ class ACME {
 
   openEmail(email) {
     this.selectedEmail = email;
+    this.quoteState = this.emptyQuoteState();
     this.view = 'detail';
     this.render();
   }
@@ -435,6 +454,113 @@ class ACME {
 
   closeConfirmModal() {
     document.getElementById('confirmOverlay').classList.add('hidden');
+  }
+
+  extractEmailAddress(fromStr) {
+    return (fromStr.match(/[\w.-]+@[\w.-]+\.\w+/) || [])[0] || '';
+  }
+
+  extractGuestName(fromStr) {
+    const match = fromStr.match(/^"?([^"<]+)"?\s*<[^>]+>/);
+    if (match) return match[1].trim();
+    return this.extractEmailAddress(fromStr).split('@')[0] || fromStr;
+  }
+
+  toggleQuoteForm() {
+    if (!this.quoteState.open && !this.quoteState.guestName) {
+      this.quoteState.guestName = this.extractGuestName(this.selectedEmail.from);
+    }
+    this.quoteState.open = !this.quoteState.open;
+    this.render();
+  }
+
+  updateQuoteField(field, value) {
+    this.quoteState[field] = value;
+    this.refreshQuotePreview();
+  }
+
+  calculateQuotePreview(checkInStr, checkOutStr) {
+    const checkIn = new Date(checkInStr + 'T00:00:00');
+    const checkOut = new Date(checkOutStr + 'T00:00:00');
+    const nights = Math.round((checkOut - checkIn) / 86400000);
+    if (!(nights > 0)) throw new Error('Il check-out deve essere dopo il check-in');
+    const month = checkIn.getMonth() + 1;
+    const isAlta = month >= 6 && month <= 9;
+    const ratePerNight = isAlta ? 150 : 80;
+    let discountPercent = 0;
+    if (nights >= 30) discountPercent = 30;
+    else if (nights >= 7) discountPercent = 15;
+    const subtotal = nights * ratePerNight;
+    const discountAmount = Math.round(subtotal * discountPercent) / 100;
+    const total = subtotal - discountAmount;
+    return { nights, ratePerNight, season: isAlta ? 'Alta stagione' : 'Bassa stagione', subtotal, discountPercent, discountAmount, total };
+  }
+
+  refreshQuotePreview() {
+    const previewEl = document.getElementById('quotePreview');
+    if (!previewEl) return;
+    const { checkIn, checkOut } = this.quoteState;
+    if (!checkIn || !checkOut) { previewEl.innerHTML = ''; return; }
+    try {
+      const q = this.calculateQuotePreview(checkIn, checkOut);
+      previewEl.innerHTML = `
+        <div class="detail-row"><span class="label">Notti</span>${q.nights}</div>
+        <div class="detail-row"><span class="label">Stagione</span>${q.season}</div>
+        <div class="detail-row"><span class="label">Tariffa</span>€ ${q.ratePerNight.toFixed(2)}/notte</div>
+        ${q.discountPercent > 0 ? `<div class="detail-row"><span class="label">Sconto</span>${q.discountPercent}% (− € ${q.discountAmount.toFixed(2)})</div>` : ''}
+        <div class="detail-row" style="font-weight:700; font-size:16px; margin-top:8px;"><span class="label">Totale</span>€ ${q.total.toFixed(2)}</div>`;
+    } catch (err) {
+      previewEl.innerHTML = `<div class="detail-row" style="color:var(--red)">${this.escape(err.message)}</div>`;
+    }
+  }
+
+  async sendQuote() {
+    const { checkIn, checkOut, guestName } = this.quoteState;
+    if (!checkIn || !checkOut || !guestName.trim()) {
+      this.error = 'Compila nome ospite, check-in e check-out prima di inviare';
+      this.render();
+      return;
+    }
+    const to = this.extractEmailAddress(this.selectedEmail.from);
+    this.quoteState.sending = true;
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/generate-quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, guestName, checkIn, checkOut })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || ('Invio fallito (status ' + res.status + ')'));
+      }
+      this.quoteState.sending = false;
+      this.quoteState.sent = true;
+      this.showQuoteConfirmation(data.confirmed, data.total);
+    } catch (e) {
+      this.quoteState.sending = false;
+      this.error = e.message;
+    }
+    this.render();
+  }
+
+  showQuoteConfirmation(confirmed, total) {
+    const overlay = document.getElementById('confirmOverlay');
+    const icon = confirmed ? '✅' : '⚠️';
+    const title = confirmed ? 'Preventivo inviato e confermato' : 'Preventivo inviato';
+    const totalText = typeof total === 'number' ? `Totale preventivato: € ${total.toFixed(2)}. ` : '';
+    const desc = confirmed
+      ? totalText + 'Il PDF è stato consegnato e verificato direttamente su Gmail.'
+      : totalText + 'Il PDF è stato inviato, ma la verifica automatica su Gmail non è riuscita in questo momento.';
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">${icon}</div>
+        <h3>${title}</h3>
+        <p>${desc}</p>
+        <button class="btn btn-primary" onclick="app.closeConfirmModal()">OK</button>
+      </div>`;
+    overlay.classList.remove('hidden');
   }
 
   updateResponseText(idx, value) {
@@ -558,11 +684,11 @@ class ACME {
 
     const heroCount = this.unresolvedCount(heroCat);
     const hero = `
-      <div class="hero-card" onclick="app.openCategory('${heroCat}')">
+      <div class="hero-card ${heroCount > 0 ? 'has-items' : ''}" onclick="app.openCategory('${heroCat}')">
         <div class="hero-icon">${heroMeta.icon}</div>
         <div class="hero-text">
           <div class="name">${heroCat}</div>
-          <div class="count ${heroCount === 0 ? 'zero' : ''}">${heroCount}</div>
+          <div class="count">${heroCount}</div>
         </div>
       </div>`;
 
@@ -656,6 +782,32 @@ class ACME {
           <span class="pill">${e.category}</span>
           <span class="pill tone-${toneClass}">${e.tone}</span>
         </div>
+      </div>
+      <div class="section-title">Preventivo</div>
+      <div class="detail-card">
+        ${!this.quoteState.open ? `
+          <button class="btn btn-primary" onclick="app.toggleQuoteForm()">📄 Formula preventivo</button>
+        ` : this.quoteState.sent ? `
+          <div class="sent-confirm">✓ Preventivo inviato a ${this.escape(this.quoteState.guestName)}</div>
+        ` : `
+          <span class="form-label">Nome ospite</span>
+          <input type="text" class="form-input" value="${this.escape(this.quoteState.guestName)}" oninput="app.updateQuoteField('guestName', this.value)">
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1;">
+              <span class="form-label">Check-in</span>
+              <input type="date" class="form-input" value="${this.quoteState.checkIn}" oninput="app.updateQuoteField('checkIn', this.value)">
+            </div>
+            <div style="flex:1;">
+              <span class="form-label">Check-out</span>
+              <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('checkOut', this.value)">
+            </div>
+          </div>
+          <div class="quote-preview" id="quotePreview"></div>
+          <div class="btn-row">
+            <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote()">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
+            <button class="btn btn-reject" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.toggleQuoteForm()">Annulla</button>
+          </div>
+        `}
       </div>
       <div class="section-title">Messaggio originale</div>
       <div class="detail-card">
