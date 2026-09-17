@@ -849,11 +849,23 @@ Domus 106`;
       ? this.extractEmailAddress(this.selectedEmail.from)
       : (qs.recipientEmail || '').trim();
 
+    // 1) Apri SUBITO la schermata "Aggiungi a Calendario", prima di qualunque
+    //    attesa di rete — se passa troppo tempo dal tocco, iOS blocca l'apertura
+    //    in silenzio, quindi questo deve essere il primissimo passo, istantaneo.
+    const icsContent = this.buildICS({ guestName, checkIn, checkOut, guestEmail, total });
+    const blob = new Blob([icsContent], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
     qs.confirming = true;
     this.error = null;
     this.render();
     try {
-      // 1) salva nell'archivio interno, per la sezione "Prenotazioni confermate"
+      // 2) salva nell'archivio interno, per la sezione "Prenotazioni confermate" — ora in background
       const res = await fetch('/api/booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -861,12 +873,6 @@ Domus 106`;
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Salvataggio prenotazione fallito');
-
-      // 2) apre la schermata "Aggiungi a Calendario" nativa dell'iPhone
-      const icsContent = this.buildICS({ guestName, checkIn, checkOut, guestEmail, total });
-      const blob = new Blob([icsContent], { type: 'text/calendar' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
 
       qs.confirmed = true;
     } catch (e) {
