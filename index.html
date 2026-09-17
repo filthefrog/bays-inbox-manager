@@ -104,6 +104,15 @@
     font-size: 15px; background: var(--card); color: var(--text);
   }
 
+  .guest-selector { display: flex; gap: 8px; margin-bottom: 12px; }
+  .guest-btn {
+    flex: 1; padding: 11px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); text-align: center; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .guest-btn:active { opacity: 0.7; }
+  .guest-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
   .hero-card {
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
@@ -394,7 +403,7 @@ class ACME {
       open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
-      notes: '',
+      notes: '', guests: 1,
       confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
     };
@@ -704,6 +713,20 @@ class ACME {
     this.render();
   }
 
+  selectGuests(stateKey, n) {
+    this[stateKey].guests = n;
+    this.render();
+  }
+
+  renderGuestSelector(stateKey, current) {
+    const opts = [1, 2, 3, 4];
+    return `
+      <span class="form-label">Numero ospiti</span>
+      <div class="guest-selector">
+        ${opts.map(n => `<div class="guest-btn ${current === n ? 'active' : ''}" onclick="app.selectGuests('${stateKey}', ${n})">${n}</div>`).join('')}
+      </div>`;
+  }
+
   updateQuoteField(stateKey, field, value) {
     const qs = this[stateKey];
     qs[field] = value;
@@ -982,6 +1005,7 @@ Domus 106`;
         body: JSON.stringify({
           guestName, guestEmail, checkIn, checkOut, total,
           notes: qs.notes || null,
+          guests: qs.guests || null,
           sourceFrom: hasSourceEmail ? this.selectedEmail.from : null,
           sourceSubject: hasSourceEmail ? this.selectedEmail.subject : null,
           sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
@@ -1406,6 +1430,7 @@ Domus 106`;
             <input type="date" class="form-input" value="${bs.checkOut}" oninput="app.updateQuoteField('emailBookingState','checkOut', this.value)">
           </div>
         </div>
+        ${this.renderGuestSelector('emailBookingState', bs.guests)}
         <span class="form-label">Note</span>
         <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('emailBookingState','notes', this.value)">${this.escape(bs.notes)}</textarea>
         <div class="confirm-booking-box">
@@ -1440,6 +1465,7 @@ Domus 106`;
               <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('quoteState','checkOut', this.value)">
             </div>
           </div>
+          ${this.renderGuestSelector('quoteState', this.quoteState.guests)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('quoteState','notes', this.value)">${this.escape(this.quoteState.notes)}</textarea>
           <div style="display:flex; gap:10px;">
@@ -1532,6 +1558,7 @@ Domus 106`;
               <input type="date" class="form-input" value="${qs.checkOut}" oninput="app.updateQuoteField('standaloneQuoteState','checkOut', this.value)">
             </div>
           </div>
+          ${this.renderGuestSelector('standaloneQuoteState', qs.guests)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('standaloneQuoteState','notes', this.value)">${this.escape(qs.notes)}</textarea>
           <div style="display:flex; gap:10px;">
@@ -1584,6 +1611,7 @@ Domus 106`;
           <div class="name">${this.escape(b.guest_name)}</div>
           <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
           ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+          ${b.guests ? `<div class="code-tag">👤 ${b.guests} ospit${b.guests === 1 ? 'e' : 'i'}</div>` : ''}
           <div class="code-tag">${b.code ? this.escape(b.code) : 'Nessun codice (prenotazione precedente all\'aggiornamento)'}</div>
           <span class="status-tag ${statusClass}">${this.escape(status)}</span>
         </div>`;
@@ -1631,6 +1659,7 @@ Domus 106`;
         ${b.guest_email ? `<div class="detail-row"><span class="label">Email</span>${this.escape(b.guest_email)}</div>` : ''}
         <div class="detail-row"><span class="label">Check-in</span><b>${checkInFmt}</b></div>
         <div class="detail-row"><span class="label">Check-out</span><b>${checkOutFmt}</b></div>
+        ${b.guests ? `<div class="detail-row"><span class="label">Ospiti</span>${b.guests}</div>` : ''}
         ${b.total ? `<div class="detail-row"><span class="label">Totale</span>€ ${Number(b.total).toFixed(2)}</div>` : ''}
       </div>
       ${hasSource ? `
