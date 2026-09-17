@@ -113,6 +113,28 @@
   .guest-btn:active { opacity: 0.7; }
   .guest-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
+  .pay-selector { display: flex; gap: 8px; margin-bottom: 12px; }
+  .pay-btn {
+    flex: 1; padding: 10px 4px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    background: var(--bg); color: var(--text-secondary); text-align: center; font-size: 12.5px; font-weight: 700;
+    cursor: pointer; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .pay-btn:active { opacity: 0.7; }
+  .pay-btn.pay-da-saldare.active { background: rgba(255,59,48,0.12); color: var(--red); border-color: transparent; }
+  .pay-btn.pay-acconto-versato.active { background: rgba(255,149,0,0.12); color: var(--orange); border-color: transparent; }
+  .pay-btn.pay-saldata.active { background: rgba(52,199,89,0.12); color: var(--green); border-color: transparent; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+    padding: 4px 9px; border-radius: 100px; display: inline-flex; align-items: center; gap: 3px;
+  }
+  .chip-code { font-family: ui-monospace, SFMono-Regular, monospace; text-transform: none; letter-spacing: 0.01em; background: rgba(142,142,147,0.12); color: var(--text-secondary); }
+  .chip-guests { background: rgba(90,200,250,0.16); color: #0669a8; }
+  .chip-pay-da-saldare { background: rgba(255,59,48,0.12); color: var(--red); }
+  .chip-pay-acconto-versato { background: rgba(255,149,0,0.12); color: var(--orange); }
+  .chip-pay-saldata { background: rgba(52,199,89,0.12); color: var(--green); }
+
   .hero-card {
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
@@ -395,7 +417,11 @@ class ACME {
     this.selectedBooking = null;
     this.bookingNotesDraft = '';
     this.bookingStatusDraft = '';
+    this.bookingPaymentDraft = '';
     this.bookingSaving = false;
+    this.checkoutReviewQueue = [];
+    this.currentCheckoutReview = null;
+    this.checkoutNoteDraft = '';
   }
 
   emptyQuoteState() {
@@ -403,7 +429,7 @@ class ACME {
       open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
-      notes: '', guests: 1,
+      notes: '', guests: 1, guestHistory: [], paymentStatus: 'da saldare',
       confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
     };
@@ -459,6 +485,7 @@ class ACME {
     this.selectedBooking = booking;
     this.bookingNotesDraft = booking.notes || '';
     this.bookingStatusDraft = booking.status || 'confermata';
+    this.bookingPaymentDraft = booking.payment_status || 'da saldare';
     this.view = 'bookingDetail';
     this.render();
   }
@@ -472,7 +499,7 @@ class ACME {
       const res = await fetch('/api/booking', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: b.id, notes: this.bookingNotesDraft, status: this.bookingStatusDraft })
+        body: JSON.stringify({ id: b.id, notes: this.bookingNotesDraft, status: this.bookingStatusDraft, paymentStatus: this.bookingPaymentDraft })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Salvataggio fallito');
@@ -583,6 +610,7 @@ class ACME {
       this.view = 'dashboard';
     }
     this.render();
+    this.checkPendingCheckoutReviews();
   }
 
   async loginWithGmail() {
@@ -604,6 +632,8 @@ class ACME {
     this.emailBookingState.guestName = this.extractGuestName(email.from);
     this.view = 'detail';
     this.render();
+    const guestEmail = this.extractEmailAddress(email.from);
+    if (guestEmail) this.checkGuestHistory('emailBookingState', guestEmail);
   }
 
   async sendResponse(idx) {
@@ -709,8 +739,13 @@ class ACME {
     if (!this.quoteState.open && !this.quoteState.guestName) {
       this.quoteState.guestName = this.extractGuestName(this.selectedEmail.from);
     }
-    this.quoteState.open = !this.quoteState.open;
+    const opening = !this.quoteState.open;
+    this.quoteState.open = opening;
     this.render();
+    if (opening && !this.quoteState.guestHistory.length) {
+      const guestEmail = this.extractEmailAddress(this.selectedEmail.from);
+      if (guestEmail) this.checkGuestHistory('quoteState', guestEmail);
+    }
   }
 
   selectGuests(stateKey, n) {
@@ -725,6 +760,145 @@ class ACME {
       <div class="guest-selector">
         ${opts.map(n => `<div class="guest-btn ${current === n ? 'active' : ''}" onclick="app.selectGuests('${stateKey}', ${n})">${n}</div>`).join('')}
       </div>`;
+  }
+
+  selectPaymentStatus(stateKey, value) {
+    this[stateKey].paymentStatus = value;
+    this.render();
+  }
+
+  renderPaymentSelector(stateKey, current) {
+    const opts = [
+      { value: 'da saldare', label: 'Da saldare' },
+      { value: 'acconto versato', label: 'Acconto' },
+      { value: 'saldata', label: 'Saldata' }
+    ];
+    return `
+      <span class="form-label">Pagamento</span>
+      <div class="pay-selector">
+        ${opts.map(o => `<div class="pay-btn pay-${o.value.replace(/\s+/g, '-')} ${current === o.value ? 'active' : ''}" onclick="app.selectPaymentStatus('${stateKey}', '${o.value}')">${o.label}</div>`).join('')}
+      </div>`;
+  }
+
+  // ---------- Storico ospite: avvisa se chi sta prenotando ha già avuto
+  // problemi in soggiorni precedenti (vedi note salvate al check-out) ----------
+  async checkGuestHistory(stateKey, email) {
+    if (!email) { this[stateKey].guestHistory = []; return; }
+    try {
+      const res = await fetch('/api/booking?guestEmail=' + encodeURIComponent(email));
+      const data = await res.json().catch(() => ({}));
+      this[stateKey].guestHistory = (data.bookings || []).filter(b => b.notes);
+    } catch (e) {
+      this[stateKey].guestHistory = [];
+    }
+    this.render();
+  }
+
+  renderGuestHistoryBanner(guestHistory) {
+    if (!guestHistory || !guestHistory.length) return '';
+    const items = guestHistory.map(h =>
+      `<div>${this.formatQuoteDate(h.check_out)}: ${this.escape(h.notes)}</div>`
+    ).join('');
+    return `<div class="discrepancy-banner">⚠️ <b>Questo ospite ha già soggiornato — note dai check-out precedenti:</b>${items}</div>`;
+  }
+
+  // ---------- Pop-up di revisione check-out: appare da solo quando una
+  // prenotazione ha raggiunto la data di check-out e non è ancora stata
+  // confermata come "andata bene" o "andata male" ----------
+  async checkPendingCheckoutReviews() {
+    try {
+      const res = await fetch('/api/booking?needsReview=true');
+      const data = await res.json().catch(() => ({}));
+      this.checkoutReviewQueue = data.bookings || [];
+    } catch (e) {
+      this.checkoutReviewQueue = [];
+    }
+    this.showNextCheckoutReview();
+  }
+
+  showNextCheckoutReview() {
+    if (!this.checkoutReviewQueue.length) return;
+    this.currentCheckoutReview = this.checkoutReviewQueue[0];
+    this.checkoutNoteDraft = '';
+    this.renderCheckoutReviewModal();
+  }
+
+  renderCheckoutReviewModal() {
+    const b = this.currentCheckoutReview;
+    const overlay = document.getElementById('confirmOverlay');
+    const checkOutFmt = this.formatQuoteDate(b.check_out);
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">🏁</div>
+        <h3>Com'è andato il soggiorno?</h3>
+        <p>${this.escape(b.guest_name)} — check-out del ${checkOutFmt}${b.code ? ' · ' + this.escape(b.code) : ''}</p>
+        <div class="btn-row">
+          <button class="btn btn-send" onclick="app.reviewCheckoutOk()">✅ Tutto ok</button>
+          <button class="btn" style="background:var(--orange); color:white;" onclick="app.reviewCheckoutProblem()">⚠️ Problemi</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="app.skipCheckoutReview()">Chiedimelo più tardi</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  async reviewCheckoutOk() {
+    const b = this.currentCheckoutReview;
+    await this.saveCheckoutReview(b, true, null);
+    this.advanceCheckoutQueue();
+  }
+
+  reviewCheckoutProblem() {
+    const b = this.currentCheckoutReview;
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">⚠️</div>
+        <h3>Cosa è successo?</h3>
+        <p>Questa nota resta legata a ${this.escape(b.guest_name)} — utile se dovesse riprenotare in futuro.</p>
+        <textarea class="form-input" style="min-height:90px; resize:vertical; text-align:left;" placeholder="Es. rumoroso, lamentele dai vicini, danni…" oninput="app.checkoutNoteDraft = this.value"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="app.skipCheckoutReview()">Salta per ora</button>
+          <button class="btn btn-send" onclick="app.saveCheckoutProblemNote()">Salva nota</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  async saveCheckoutProblemNote() {
+    const b = this.currentCheckoutReview;
+    await this.saveCheckoutReview(b, true, this.checkoutNoteDraft || null);
+    this.advanceCheckoutQueue();
+  }
+
+  skipCheckoutReview() {
+    // non segna come rivisto: ricomparirà al prossimo avvio dell'app
+    this.closeConfirmModal();
+    this.checkoutReviewQueue.shift();
+    this.currentCheckoutReview = null;
+    setTimeout(() => this.showNextCheckoutReview(), 400);
+  }
+
+  async saveCheckoutReview(booking, reviewed, note) {
+    try {
+      const existingNotes = booking.notes ? booking.notes + '\n' : '';
+      const combinedNotes = note ? existingNotes + note : (booking.notes || null);
+      await fetch('/api/booking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: booking.id, status: 'conclusa', checkoutReviewed: reviewed, notes: combinedNotes })
+      });
+      const idx = this.bookings.findIndex(x => x.id === booking.id);
+      if (idx !== -1) { this.bookings[idx].status = 'conclusa'; this.bookings[idx].notes = combinedNotes; }
+    } catch (e) {}
+  }
+
+  advanceCheckoutQueue() {
+    this.checkoutReviewQueue.shift();
+    this.currentCheckoutReview = null;
+    this.closeConfirmModal();
+    setTimeout(() => this.showNextCheckoutReview(), 400);
   }
 
   updateQuoteField(stateKey, field, value) {
@@ -1002,6 +1176,7 @@ Domus 106`;
           guestName, guestEmail, checkIn, checkOut, total,
           notes: qs.notes || null,
           guests: qs.guests || null,
+          paymentStatus: qs.paymentStatus || 'da saldare',
           sourceFrom: hasSourceEmail ? this.selectedEmail.from : null,
           sourceSubject: hasSourceEmail ? this.selectedEmail.subject : null,
           sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
@@ -1435,6 +1610,7 @@ Domus 106`;
     const bookingSection = `
       <div class="section-title">Prenotazione</div>
       <div class="detail-card">
+        ${this.renderGuestHistoryBanner(bs.guestHistory)}
         <span class="form-label">Nome ospite</span>
         <input type="text" class="form-input" value="${this.escape(bs.guestName)}" oninput="app.updateQuoteField('emailBookingState','guestName', this.value)">
         <div style="display:flex; gap:10px;">
@@ -1448,6 +1624,7 @@ Domus 106`;
           </div>
         </div>
         ${this.renderGuestSelector('emailBookingState', bs.guests)}
+        ${this.renderPaymentSelector('emailBookingState', bs.paymentStatus)}
         <span class="form-label">Note</span>
         <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('emailBookingState','notes', this.value)">${this.escape(bs.notes)}</textarea>
         <div class="confirm-booking-box">
@@ -1472,6 +1649,7 @@ Domus 106`;
         ` : `
           <span class="form-label">Nome ospite</span>
           <input type="text" class="form-input" value="${this.escape(this.quoteState.guestName)}" oninput="app.updateQuoteField('quoteState','guestName', this.value)">
+          ${this.renderGuestHistoryBanner(this.quoteState.guestHistory)}
           <div style="display:flex; gap:10px;">
             <div style="flex:1;">
               <span class="form-label">Check-in</span>
@@ -1483,6 +1661,7 @@ Domus 106`;
             </div>
           </div>
           ${this.renderGuestSelector('quoteState', this.quoteState.guests)}
+          ${this.renderPaymentSelector('quoteState', this.quoteState.paymentStatus)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('quoteState','notes', this.value)">${this.escape(this.quoteState.notes)}</textarea>
           <div style="display:flex; gap:10px;">
@@ -1564,7 +1743,8 @@ Domus 106`;
           <span class="form-label">Nome ospite</span>
           <input type="text" class="form-input" value="${this.escape(qs.guestName)}" oninput="app.updateQuoteField('standaloneQuoteState','guestName', this.value)">
           <span class="form-label">Email destinatario</span>
-          <input type="email" class="form-input" placeholder="nome@esempio.com" value="${this.escape(qs.recipientEmail)}" oninput="app.updateQuoteField('standaloneQuoteState','recipientEmail', this.value)">
+          <input type="email" class="form-input" placeholder="nome@esempio.com" value="${this.escape(qs.recipientEmail)}" oninput="app.updateQuoteField('standaloneQuoteState','recipientEmail', this.value)" onblur="app.checkGuestHistory('standaloneQuoteState', this.value)">
+          ${this.renderGuestHistoryBanner(qs.guestHistory)}
           <div style="display:flex; gap:10px;">
             <div style="flex:1;">
               <span class="form-label">Check-in</span>
@@ -1576,6 +1756,7 @@ Domus 106`;
             </div>
           </div>
           ${this.renderGuestSelector('standaloneQuoteState', qs.guests)}
+          ${this.renderPaymentSelector('standaloneQuoteState', qs.paymentStatus)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('standaloneQuoteState','notes', this.value)">${this.escape(qs.notes)}</textarea>
           <div style="display:flex; gap:10px;">
@@ -1622,15 +1803,23 @@ Domus 106`;
       const safeBooking = JSON.stringify(b).replace(/'/g, "&#39;");
       const status = b.status || 'confermata';
       const statusClass = 'status-' + status.replace(/\s+/g, '-');
+      const payment = b.payment_status || 'da saldare';
+      const paymentClass = 'chip-pay-' + payment.replace(/\s+/g, '-');
+      const paymentLabel = payment === 'da saldare' ? 'Da saldare' : (payment === 'acconto versato' ? 'Acconto' : 'Saldata');
       return `
         <div class="booking-row" onclick='app.openBookingDetail(${safeBooking})'>
           <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissBooking(${b.id})'>✕</button>
-          <div class="name">${this.escape(b.guest_name)}</div>
+          <div class="row-top">
+            <div class="name">${this.escape(b.guest_name)}</div>
+            ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+          </div>
           <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
-          ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
-          ${b.guests ? `<div class="code-tag">👤 ${b.guests} ospit${b.guests === 1 ? 'e' : 'i'}</div>` : ''}
-          <div class="code-tag">${b.code ? this.escape(b.code) : 'Nessun codice (prenotazione precedente all\'aggiornamento)'}</div>
-          <span class="status-tag ${statusClass}">${this.escape(status)}</span>
+          <div class="chip-row">
+            <span class="chip ${statusClass}">${this.escape(status)}</span>
+            <span class="chip ${paymentClass}">${paymentLabel}</span>
+            ${b.guests ? `<span class="chip chip-guests">👤 ${b.guests}</span>` : ''}
+            <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
+          </div>
         </div>`;
     }).join('');
   }
@@ -1656,6 +1845,9 @@ Domus 106`;
     const statusOptions = BOOKING_STATUSES.map(s =>
       `<option value="${s}" ${this.bookingStatusDraft === s ? 'selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
     ).join('');
+    const paymentOptions = [
+      ['da saldare', 'Da saldare'], ['acconto versato', 'Acconto versato'], ['saldata', 'Saldata']
+    ].map(([v, l]) => `<option value="${v}" ${this.bookingPaymentDraft === v ? 'selected' : ''}>${l}</option>`).join('');
 
     return `
       <div class="list-header">
@@ -1688,10 +1880,12 @@ Domus 106`;
           ${b.source_body ? `<div class="src-body">${this.escape(b.source_body)}</div>` : ''}
         </div>
       </div>` : ''}
-      <div class="section-title">Stato e note</div>
+      <div class="section-title">Stato, pagamento e note</div>
       <div class="detail-card">
-        <span class="form-label">Stato</span>
+        <span class="form-label">Stato soggiorno</span>
         <select class="form-input" onchange="app.bookingStatusDraft = this.value">${statusOptions}</select>
+        <span class="form-label">Stato pagamento</span>
+        <select class="form-input" onchange="app.bookingPaymentDraft = this.value">${paymentOptions}</select>
         <span class="form-label">Note</span>
         <textarea class="form-input" style="min-height:90px; resize:vertical;" placeholder="Es. arriva in ritardo, ha chiesto una culla…" oninput="app.bookingNotesDraft = this.value">${this.escape(this.bookingNotesDraft)}</textarea>
         <button class="btn btn-primary" ${this.bookingSaving ? 'disabled' : ''} onclick="app.saveBookingDetail()">${this.bookingSaving ? 'Salvataggio…' : 'Salva modifiche'}</button>
