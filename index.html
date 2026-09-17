@@ -399,13 +399,13 @@
 
 <script>
 const CATEGORY_META = {
-  'Lamentela':               { icon: '⚠️', color: 'red' },
-  'Prenotazione':            { icon: '📅', color: 'blue' },
-  'Problema tecnico':        { icon: '🔧', color: 'orange' },
-  'Fatturazione':            { icon: '💳', color: 'purple' },
-  'Richiesta informazioni':  { icon: '❓', color: 'teal' },
-  'Complimento':             { icon: '⭐', color: 'green' },
-  'Cancellazione':           { icon: '❌', color: 'gray' }
+  'Lamentela':               { icon: '⚠️', color: 'red', label: 'Lamentela' },
+  'Prenotazione':            { icon: '📅', color: 'blue', label: 'Richieste prenotazioni' },
+  'Problema tecnico':        { icon: '🔧', color: 'orange', label: 'Problema tecnico' },
+  'Fatturazione':            { icon: '💳', color: 'purple', label: 'Fatturazione' },
+  'Richiesta informazioni':  { icon: '❓', color: 'teal', label: 'Richiesta informazioni' },
+  'Complimento':             { icon: '⭐', color: 'green', label: 'Complimento' },
+  'Cancellazione':           { icon: '❌', color: 'gray', label: 'Cancellazione' }
 };
 
 const BOOKING_STATUSES = ['confermata', 'in arrivo', 'conclusa', 'cancellata'];
@@ -1312,6 +1312,17 @@ Domus 106`;
     qs.confirmedCode = (savedBooking && savedBooking.code) || null;
     qs.confirming = false;
     this.showBookingSavedConfirmation(true, qs.confirmedCode);
+    // La mail di origine è "gestita": sparisce dal box Richieste prenotazioni,
+    // esattamente come quando si invia una risposta o si scarta manualmente.
+    if (hasSourceEmail) {
+      this.resolvedIds.add(this.selectedEmail.id);
+      this.saveResolvedIds();
+      fetch('/api/mark-resolved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailId: this.selectedEmail.id })
+      }).catch(() => {});
+    }
     this.render();
   }
 
@@ -1595,7 +1606,7 @@ Domus 106`;
       <div class="hero-card ${heroCount > 0 ? 'has-items' : ''}" onclick="app.openCategory('${heroCat}')">
         <div class="hero-icon">${heroMeta.icon}</div>
         <div class="hero-text">
-          <div class="name">${heroCat}</div>
+          <div class="name">${heroMeta.label || heroCat}</div>
           <div class="count">${heroCount}</div>
         </div>
       </div>`;
@@ -1605,7 +1616,7 @@ Domus 106`;
       return `
         <div class="card" onclick="app.openCategory('${cat}')">
           <div class="icon ${meta.color}">${meta.icon}</div>
-          <div class="name">${cat}</div>
+          <div class="name">${meta.label || cat}</div>
           <div class="count ${count === 0 ? 'zero' : ''}">${count}</div>
         </div>`;
     }).join('');
@@ -1683,7 +1694,7 @@ Domus 106`;
       <div class="list-header">
         <div class="back" onclick="app.goBack()">‹ Categorie</div>
       </div>
-      <div class="list-title" style="margin-bottom:16px;">${meta.icon} ${this.selectedCategory}</div>
+      <div class="list-title" style="margin-bottom:16px;">${meta.icon} ${meta.label || this.selectedCategory}</div>
       ${rows}`;
   }
 
