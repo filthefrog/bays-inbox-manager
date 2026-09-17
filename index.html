@@ -479,16 +479,25 @@ class ACME {
     }).catch(() => {});
   }
 
-  async dismissBooking(id) {
-    try {
-      await fetch('/api/booking', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-    } catch (e) {}
-    this.bookings = this.bookings.filter(b => b.id !== id);
-    this.render();
+  dismissBooking(id) {
+    const booking = this.bookings.find(b => b.id === id);
+    const name = booking ? booking.guest_name : 'questa prenotazione';
+    this.showConfirmDialog({
+      title: 'Eliminare la prenotazione?',
+      desc: `${name} verrà rimossa definitivamente dall'archivio${booking && booking.code ? ' (codice ' + booking.code + ')' : ''}. Non è recuperabile.`,
+      confirmLabel: 'Elimina',
+      onConfirm: async () => {
+        try {
+          await fetch('/api/booking', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+          });
+        } catch (e) {}
+        this.bookings = this.bookings.filter(b => b.id !== id);
+        this.render();
+      }
+    });
   }
 
   saveResolvedIds() {
@@ -639,6 +648,36 @@ class ACME {
 
   closeConfirmModal() {
     document.getElementById('confirmOverlay').classList.add('hidden');
+  }
+
+  // Dialog di conferma generico usato prima di ogni cancellazione (✕): mostra
+  // Annulla + un bottone d'azione rosso, ed esegue onConfirm solo se confermato.
+  showConfirmDialog({ title, desc, confirmLabel = 'Elimina', onConfirm }) {
+    this._pendingConfirmAction = onConfirm;
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">🗑️</div>
+        <h3>${title}</h3>
+        <p>${desc}</p>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="app.cancelConfirmDialog()">Annulla</button>
+          <button class="btn" style="background:var(--red); color:white;" onclick="app.runConfirmedAction()">${confirmLabel}</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  cancelConfirmDialog() {
+    this._pendingConfirmAction = null;
+    document.getElementById('confirmOverlay').classList.add('hidden');
+  }
+
+  runConfirmedAction() {
+    const action = this._pendingConfirmAction;
+    this._pendingConfirmAction = null;
+    document.getElementById('confirmOverlay').classList.add('hidden');
+    if (action) action();
   }
 
   extractEmailAddress(fromStr) {
@@ -1014,14 +1053,21 @@ Domus 106`;
   }
 
   dismissEmail(email) {
-    this.resolvedIds.add(email.id);
-    this.saveResolvedIds();
-    fetch('/api/mark-resolved', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ emailId: email.id })
-    }).catch(() => {});
-    this.render();
+    this.showConfirmDialog({
+      title: 'Rimuovere questa email?',
+      desc: 'Sparirà dalla lista di ACME. Resta comunque nella tua casella Gmail, quindi puoi sempre ritrovarla lì.',
+      confirmLabel: 'Rimuovi',
+      onConfirm: () => {
+        this.resolvedIds.add(email.id);
+        this.saveResolvedIds();
+        fetch('/api/mark-resolved', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emailId: email.id })
+        }).catch(() => {});
+        this.render();
+      }
+    });
   }
 
   async reanalyzeEmail() {
@@ -1494,7 +1540,7 @@ Domus 106`;
           <div class="name">${this.escape(b.guest_name)}</div>
           <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
           ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
-          ${b.code ? `<div class="code-tag">${this.escape(b.code)}</div>` : ''}
+          <div class="code-tag">${b.code ? this.escape(b.code) : 'Nessun codice (prenotazione precedente all\'aggiornamento)'}</div>
           <span class="status-tag ${statusClass}">${this.escape(status)}</span>
         </div>`;
     }).join('');
