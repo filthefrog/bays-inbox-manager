@@ -41,6 +41,23 @@ export default async function handler(req, res) {
       cookies.push(
         `gmail_refresh=${tokenData.refresh_token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`
       );
+
+      // Salva una copia anche su Supabase: serve al controllo automatico periodico,
+      // che gira senza browser e quindi senza questi cookie.
+      const SUPABASE_URL = process.env.SUPABASE_URL;
+      const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+      if (SUPABASE_URL && SUPABASE_KEY) {
+        await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            Prefer: 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify({ id: 'gmail_refresh_token', value: tokenData.refresh_token })
+        }).catch(() => {}); // non bloccare il login se questo fallisce
+      }
     }
     res.setHeader("Set-Cookie", cookies);
 
