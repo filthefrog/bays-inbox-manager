@@ -66,7 +66,27 @@
   .card .count { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
   .card .count.zero { color: var(--text-secondary); }
 
-  .hero-card {
+  .quote-launch {
+    background: rgba(10,110,189,0.08);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 12px;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .quote-launch:active { transform: scale(0.98); }
+  .quote-launch .icon {
+    width: 44px; height: 44px; flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    background: rgba(10,110,189,0.14);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  .quote-launch .name { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .quote-launch .subtitle { font-size: 12px; color: var(--text-secondary); }
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
     border-radius: var(--radius-lg);
@@ -241,6 +261,7 @@
   .confirm-box h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
   .confirm-box p { font-size: 14px; color: var(--text-secondary); margin-bottom: 22px; line-height: 1.45; }
   .btn-row { display: flex; gap: 8px; }
+  .btn-row + .btn-row { margin-top: 8px; }
   .btn {
     flex: 1; border: none; border-radius: var(--radius-sm); padding: 11px;
     font-size: 15px; font-weight: 600; cursor: pointer;
@@ -251,6 +272,7 @@
   .btn-send { background: var(--green); color: white; }
   .btn-send.sent { background: rgba(52,199,89,0.15); color: var(--green); }
   .btn-reject { background: rgba(255,59,48,0.1); color: var(--red); }
+  .btn-secondary { background: rgba(10,110,189,0.1); color: var(--accent); }
 
   .empty, .loading, .login-box {
     text-align: center; padding: 60px 20px; color: var(--text-secondary);
@@ -317,15 +339,22 @@ class ACME {
     this.resolvedIds = new Set(JSON.parse(localStorage.getItem('acme_resolved_ids') || '[]'));
     this.sendingIdx = null;
     this.quoteState = this.emptyQuoteState();
+    this.standaloneQuoteState = this.emptyQuoteState();
   }
 
   emptyQuoteState() {
     return {
-      open: false, checkIn: '', checkOut: '', guestName: '',
+      open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
-      emailMessage: '', messageTouched: false, generatingMessage: false,
+      emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
       sending: false, sent: false
     };
+  }
+
+  openStandaloneQuote() {
+    this.standaloneQuoteState = this.emptyQuoteState();
+    this.view = 'quoteStandalone';
+    this.render();
   }
 
   saveResolvedIds() {
@@ -479,18 +508,19 @@ class ACME {
     this.render();
   }
 
-  updateQuoteField(field, value) {
-    this.quoteState[field] = value;
-    if (field === 'ratePerNight') this.quoteState.rateTouched = true;
-    if (field === 'discountPercent') this.quoteState.discountTouched = true;
-    if (field === 'emailMessage') this.quoteState.messageTouched = true;
-    if (field === 'checkIn' || field === 'checkOut') this.applySuggestedDefaults();
-    if (field !== 'emailMessage' && !this.quoteState.messageTouched) {
-      this.quoteState.emailMessage = this.buildDefaultQuoteMessage();
-      const msgEl = document.getElementById('quoteMessage');
-      if (msgEl) msgEl.value = this.quoteState.emailMessage;
+  updateQuoteField(stateKey, field, value) {
+    const qs = this[stateKey];
+    qs[field] = value;
+    if (field === 'ratePerNight') qs.rateTouched = true;
+    if (field === 'discountPercent') qs.discountTouched = true;
+    if (field === 'emailMessage') qs.messageTouched = true;
+    if (field === 'checkIn' || field === 'checkOut') this.applySuggestedDefaults(stateKey);
+    if (field !== 'emailMessage' && !qs.messageTouched) {
+      qs.emailMessage = this.buildDefaultQuoteMessage(stateKey);
+      const msgEl = document.getElementById(stateKey === 'quoteState' ? 'quoteMessage' : 'standaloneQuoteMessage');
+      if (msgEl) msgEl.value = qs.emailMessage;
     }
-    this.refreshQuotePreview();
+    this.refreshQuotePreview(stateKey);
   }
 
   formatQuoteDate(isoDateStr) {
@@ -500,8 +530,9 @@ class ACME {
     return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
   }
 
-  buildDefaultQuoteMessage() {
-    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = this.quoteState;
+  buildDefaultQuoteMessage(stateKey) {
+    const qs = this[stateKey];
+    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = qs;
     if (!checkIn || !checkOut || !guestName || !ratePerNight) return '';
     let nights;
     try { nights = this.computeNightsPreview(checkIn, checkOut); } catch (e) { return ''; }
@@ -538,26 +569,28 @@ Domus 106`;
     return (month >= 6 && month <= 9) ? 150 : 80;
   }
 
-  applySuggestedDefaults() {
-    const { checkIn, checkOut } = this.quoteState;
+  applySuggestedDefaults(stateKey) {
+    const qs = this[stateKey];
+    const { checkIn, checkOut } = qs;
     if (!checkIn || !checkOut) return;
     try {
       const nights = this.computeNightsPreview(checkIn, checkOut);
-      if (!this.quoteState.rateTouched) {
-        this.quoteState.ratePerNight = String(this.suggestRatePreview(checkIn));
+      if (!qs.rateTouched) {
+        qs.ratePerNight = String(this.suggestRatePreview(checkIn));
       }
-      if (!this.quoteState.discountTouched) {
-        this.quoteState.discountPercent = String(nights >= 30 ? 30 : (nights >= 7 ? 15 : 0));
+      if (!qs.discountTouched) {
+        qs.discountPercent = String(nights >= 30 ? 30 : (nights >= 7 ? 15 : 0));
       }
     } catch (e) {
       // date non ancora valide insieme, non facciamo nulla
     }
   }
 
-  refreshQuotePreview() {
-    const previewEl = document.getElementById('quotePreview');
+  refreshQuotePreview(stateKey) {
+    const previewEl = document.getElementById(stateKey === 'quoteState' ? 'quotePreview' : 'standaloneQuotePreview');
     if (!previewEl) return;
-    const { checkIn, checkOut, ratePerNight, discountPercent } = this.quoteState;
+    const qs = this[stateKey];
+    const { checkIn, checkOut, ratePerNight, discountPercent } = qs;
     if (!checkIn || !checkOut || !ratePerNight) { previewEl.innerHTML = ''; return; }
     try {
       const nights = this.computeNightsPreview(checkIn, checkOut);
@@ -576,8 +609,9 @@ Domus 106`;
     }
   }
 
-  async generateQuoteMessageWithAI() {
-    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = this.quoteState;
+  async generateQuoteMessageWithAI(stateKey) {
+    const qs = this[stateKey];
+    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = qs;
     if (!guestName || !checkIn || !checkOut || !ratePerNight) {
       this.error = 'Compila nome ospite, date e tariffa prima di generare il messaggio';
       this.render();
@@ -597,7 +631,7 @@ Domus 106`;
     discountAmount = Math.round(subtotal * discount) / 100;
     total = subtotal - discountAmount;
 
-    this.quoteState.generatingMessage = true;
+    qs.generatingMessage = true;
     this.error = null;
     this.render();
     try {
@@ -622,26 +656,86 @@ Domus 106`;
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || ('Generazione fallita (status ' + res.status + ')'));
-      this.quoteState.emailMessage = data.message;
-      this.quoteState.messageTouched = true;
+      qs.emailMessage = data.message;
+      qs.messageTouched = true;
       const msgEl = document.getElementById('quoteMessage');
       if (msgEl) msgEl.value = data.message;
     } catch (e) {
       this.error = e.message;
     }
-    this.quoteState.generatingMessage = false;
+    qs.generatingMessage = false;
     this.render();
   }
 
-  async sendQuote() {
-    const { checkIn, checkOut, guestName, ratePerNight, discountPercent, emailMessage } = this.quoteState;
+  async shareQuotePdf(stateKey) {
+    const qs = this[stateKey];
+    const { checkIn, checkOut, guestName, ratePerNight, discountPercent } = qs;
+    if (!checkIn || !checkOut || !guestName.trim() || !ratePerNight) {
+      this.error = 'Compila nome ospite, date e tariffa prima di condividere';
+      this.render();
+      return;
+    }
+    qs.sharing = true;
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/generate-quote-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestName, checkIn, checkOut, ratePerNight, discountPercent })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Generazione PDF fallita');
+
+      const byteChars = atob(data.pdfBase64);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+      const byteArray = new Uint8Array(byteNumbers);
+      const file = new File([byteArray], data.filename || 'Preventivo_Domus106.pdf', { type: 'application/pdf' });
+
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: 'Preventivo Domus 106',
+            text: `Preventivo di soggiorno per ${guestName}`
+          });
+        } else {
+          throw new Error('share-unsupported');
+        }
+      } catch (shareErr) {
+        if (shareErr.name === 'AbortError') {
+          // l'utente ha chiuso il foglio di condivisione, nessun errore da mostrare
+        } else {
+          // ripiego: apri il PDF in una nuova scheda, da lì si può comunque salvare/condividere a mano
+          const url = URL.createObjectURL(file);
+          window.open(url, '_blank');
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') this.error = e.message;
+    }
+    qs.sharing = false;
+    this.render();
+  }
+
+  async sendQuote(stateKey) {
+    const qs = this[stateKey];
+    const { checkIn, checkOut, guestName, ratePerNight, discountPercent, emailMessage } = qs;
     if (!checkIn || !checkOut || !guestName.trim() || !ratePerNight) {
       this.error = 'Compila nome ospite, date e tariffa prima di inviare';
       this.render();
       return;
     }
-    const to = this.extractEmailAddress(this.selectedEmail.from);
-    this.quoteState.sending = true;
+    const to = stateKey === 'quoteState'
+      ? this.extractEmailAddress(this.selectedEmail.from)
+      : (qs.recipientEmail || '').trim();
+    if (!to) {
+      this.error = 'Inserisci l\'indirizzo email del destinatario';
+      this.render();
+      return;
+    }
+    qs.sending = true;
     this.error = null;
     this.render();
     try {
@@ -654,11 +748,11 @@ Domus 106`;
       if (!res.ok) {
         throw new Error(data.error || ('Invio fallito (status ' + res.status + ')'));
       }
-      this.quoteState.sending = false;
-      this.quoteState.sent = true;
+      qs.sending = false;
+      qs.sent = true;
       this.showQuoteConfirmation(data.confirmed, data.total);
     } catch (e) {
-      this.quoteState.sending = false;
+      qs.sending = false;
       this.error = e.message;
     }
     this.render();
@@ -745,6 +839,7 @@ Domus 106`;
   goBack() {
     if (this.view === 'detail') { this.view = 'emails'; this.selectedEmail = null; }
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
+    else if (this.view === 'quoteStandalone') { this.view = 'dashboard'; }
     this.render();
   }
 
@@ -830,6 +925,13 @@ Domus 106`;
       ${this.error ? `<div class="error-banner">${this.error}</div>` : ''}
       ${hero}
       <div class="grid">${cards}</div>
+      <div class="quote-launch" onclick="app.openStandaloneQuote()">
+        <div class="icon">📄</div>
+        <div>
+          <div class="name">Genera preventivo</div>
+          <div class="subtitle">Crea un preventivo senza partire da una mail</div>
+        </div>
+      </div>
       <div class="refresh-row">
         <div class="status">${updatedText}</div>
         <button class="icon-btn" onclick="app.loadEmails()">↻</button>
@@ -901,37 +1003,40 @@ Domus 106`;
           <div class="sent-confirm">✓ Preventivo inviato a ${this.escape(this.quoteState.guestName)}</div>
         ` : `
           <span class="form-label">Nome ospite</span>
-          <input type="text" class="form-input" value="${this.escape(this.quoteState.guestName)}" oninput="app.updateQuoteField('guestName', this.value)">
+          <input type="text" class="form-input" value="${this.escape(this.quoteState.guestName)}" oninput="app.updateQuoteField('quoteState','guestName', this.value)">
           <div style="display:flex; gap:10px;">
             <div style="flex:1;">
               <span class="form-label">Check-in</span>
-              <input type="date" class="form-input" value="${this.quoteState.checkIn}" oninput="app.updateQuoteField('checkIn', this.value)">
+              <input type="date" class="form-input" value="${this.quoteState.checkIn}" oninput="app.updateQuoteField('quoteState','checkIn', this.value)">
             </div>
             <div style="flex:1;">
               <span class="form-label">Check-out</span>
-              <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('checkOut', this.value)">
+              <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('quoteState','checkOut', this.value)">
             </div>
           </div>
           <div style="display:flex; gap:10px;">
             <div style="flex:1;">
               <span class="form-label">Tariffa/notte (€)</span>
-              <input type="number" step="0.01" class="form-input" value="${this.quoteState.ratePerNight}" oninput="app.updateQuoteField('ratePerNight', this.value)">
+              <input type="number" step="0.01" class="form-input" value="${this.quoteState.ratePerNight}" oninput="app.updateQuoteField('quoteState','ratePerNight', this.value)">
             </div>
             <div style="flex:1;">
               <span class="form-label">Sconto (%)</span>
-              <input type="number" step="1" min="0" max="100" class="form-input" value="${this.quoteState.discountPercent}" oninput="app.updateQuoteField('discountPercent', this.value)">
+              <input type="number" step="1" min="0" max="100" class="form-input" value="${this.quoteState.discountPercent}" oninput="app.updateQuoteField('quoteState','discountPercent', this.value)">
             </div>
           </div>
           <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
           <div class="quote-preview" id="quotePreview"></div>
           <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
             <span class="form-label" style="margin-bottom:0;">Messaggio email di accompagnamento</span>
-            <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI()">✨ ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
+            <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI('quoteState')">✨ ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
           </div>
-          <textarea id="quoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('emailMessage', this.value)">${this.escape(this.quoteState.emailMessage)}</textarea>
+          <textarea id="quoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('quoteState','emailMessage', this.value)">${this.escape(this.quoteState.emailMessage)}</textarea>
           <div class="btn-row">
-            <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote()">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
+            <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote('quoteState')">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
             <button class="btn btn-reject" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.toggleQuoteForm()">Annulla</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-secondary" ${this.quoteState.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('quoteState')">${this.quoteState.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
           </div>
         `}
       </div>`;
@@ -965,6 +1070,57 @@ Domus 106`;
       ${quoteOpen ? originalMessageSection + quoteSection : quoteSection + originalMessageSection + responsesSection}`;
   }
 
+  renderStandaloneQuote() {
+    const qs = this.standaloneQuoteState;
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ACME</div>
+      </div>
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Genera preventivo</h1></div>
+      <div class="detail-card">
+        ${qs.sent ? `
+          <div class="sent-confirm">✓ Preventivo inviato a ${this.escape(qs.guestName)}</div>
+          <button class="btn btn-primary" style="margin-top:12px;" onclick="app.openStandaloneQuote()">Nuovo preventivo</button>
+        ` : `
+          <span class="form-label">Nome ospite</span>
+          <input type="text" class="form-input" value="${this.escape(qs.guestName)}" oninput="app.updateQuoteField('standaloneQuoteState','guestName', this.value)">
+          <span class="form-label">Email destinatario</span>
+          <input type="email" class="form-input" placeholder="nome@esempio.com" value="${this.escape(qs.recipientEmail)}" oninput="app.updateQuoteField('standaloneQuoteState','recipientEmail', this.value)">
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1;">
+              <span class="form-label">Check-in</span>
+              <input type="date" class="form-input" value="${qs.checkIn}" oninput="app.updateQuoteField('standaloneQuoteState','checkIn', this.value)">
+            </div>
+            <div style="flex:1;">
+              <span class="form-label">Check-out</span>
+              <input type="date" class="form-input" value="${qs.checkOut}" oninput="app.updateQuoteField('standaloneQuoteState','checkOut', this.value)">
+            </div>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1;">
+              <span class="form-label">Tariffa/notte (€)</span>
+              <input type="number" step="0.01" class="form-input" value="${qs.ratePerNight}" oninput="app.updateQuoteField('standaloneQuoteState','ratePerNight', this.value)">
+            </div>
+            <div style="flex:1;">
+              <span class="form-label">Sconto (%)</span>
+              <input type="number" step="1" min="0" max="100" class="form-input" value="${qs.discountPercent}" oninput="app.updateQuoteField('standaloneQuoteState','discountPercent', this.value)">
+            </div>
+          </div>
+          <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
+          <div class="quote-preview" id="standaloneQuotePreview"></div>
+          <span class="form-label">Messaggio email di accompagnamento</span>
+          <textarea id="standaloneQuoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('standaloneQuoteState','emailMessage', this.value)">${this.escape(qs.emailMessage)}</textarea>
+          <div class="btn-row">
+            <button class="btn btn-send" ${qs.sending ? 'disabled' : ''} onclick="app.sendQuote('standaloneQuoteState')">${qs.sending ? 'Invio…' : 'Genera e invia via email'}</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-secondary" ${qs.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('standaloneQuoteState')">${qs.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
+          </div>
+        `}
+      </div>`;
+  }
+
   formatDate(dateStr, full) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
@@ -989,6 +1145,7 @@ Domus 106`;
     else if (this.view === 'dashboard') el.innerHTML = this.renderDashboard();
     else if (this.view === 'emails') el.innerHTML = this.renderEmails();
     else if (this.view === 'detail') el.innerHTML = this.renderDetail();
+    else if (this.view === 'quoteStandalone') el.innerHTML = this.renderStandaloneQuote();
   }
 }
 
