@@ -332,8 +332,23 @@
     padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px;
   }
 
-  .settings-link { text-align: center; margin-top: 28px; }
-  .settings-link a { font-size: 13px; color: var(--text-secondary); text-decoration: none; }
+  .settings-card {
+    background: var(--card);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-top: 20px;
+    border: 1px solid rgba(60,60,67,0.06);
+  }
+  .settings-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 16px;
+    cursor: pointer;
+  }
+  .settings-row:active { background: var(--bg); }
+  .settings-row + .settings-row { border-top: 1px solid rgba(60,60,67,0.08); }
+  .settings-row .settings-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
+  .settings-row .settings-label { flex: 1; font-size: 15px; color: var(--text); }
+  .settings-row .settings-chevron { color: var(--text-secondary); font-size: 16px; }
 </style>
 </head>
 <body>
@@ -1181,7 +1196,23 @@ Domus 106`;
         <div class="status">${updatedText}</div>
         <button class="icon-btn" onclick="app.loadEmails()">↻</button>
       </div>
-      <div class="settings-link"><a onclick="app.resetKey()">Cambia chiave API</a> &nbsp;·&nbsp; <a onclick="app.reconnectGmail()">Riconnetti Gmail</a> &nbsp;·&nbsp; <a onclick="app.togglePushNotifications()">${this.pushEnabled ? '🔕 Disattiva notifiche' : '🔔 Attiva notifiche'}</a></div>`;
+      <div class="settings-card">
+        <div class="settings-row" onclick="app.resetKey()">
+          <span class="settings-icon">🔑</span>
+          <span class="settings-label">Cambia chiave API</span>
+          <span class="settings-chevron">›</span>
+        </div>
+        <div class="settings-row" onclick="app.reconnectGmail()">
+          <span class="settings-icon">✉️</span>
+          <span class="settings-label">Riconnetti Gmail</span>
+          <span class="settings-chevron">›</span>
+        </div>
+        <div class="settings-row" onclick="app.togglePushNotifications()">
+          <span class="settings-icon">${this.pushEnabled ? '🔕' : '🔔'}</span>
+          <span class="settings-label">${this.pushEnabled ? 'Disattiva notifiche' : 'Attiva notifiche'}</span>
+          <span class="settings-chevron">›</span>
+        </div>
+      </div>`;
   }
 
   renderEmails() {
