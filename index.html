@@ -90,26 +90,7 @@
   .booking-row .dates { font-size: 13px; color: var(--text-secondary); }
   .booking-row .total { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 4px; }
   .booking-row .dismiss-btn { top: 12px; right: 12px; }
-    background: rgba(10,110,189,0.08);
-    border-radius: var(--radius-lg);
-    padding: 18px 20px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 12px;
-    cursor: pointer;
-    transition: transform 0.15s ease;
-  }
-  .quote-launch:active { transform: scale(0.98); }
-  .quote-launch .icon {
-    width: 44px; height: 44px; flex-shrink: 0;
-    border-radius: var(--radius-sm);
-    background: rgba(10,110,189,0.14);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 20px;
-  }
-  .quote-launch .name { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
-  .quote-launch .subtitle { font-size: 12px; color: var(--text-secondary); }
+  .card .card-subtitle { font-size: 11px; color: var(--text-secondary); line-height: 1.3; margin-top: 2px; }
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
     border-radius: var(--radius-lg);
@@ -380,6 +361,7 @@ class ACME {
     this.sendingIdx = null;
     this.quoteState = this.emptyQuoteState();
     this.standaloneQuoteState = this.emptyQuoteState();
+    this.emailBookingState = this.emptyQuoteState();
     this.pushEnabled = false;
     this.bookings = [];
     this.bookingsLoading = false;
@@ -524,6 +506,8 @@ class ACME {
   openEmail(email) {
     this.selectedEmail = email;
     this.quoteState = this.emptyQuoteState();
+    this.emailBookingState = this.emptyQuoteState();
+    this.emailBookingState.guestName = this.extractGuestName(email.from);
     this.view = 'detail';
     this.render();
   }
@@ -861,7 +845,7 @@ Domus 106`;
       total = subtotal - discountAmount;
     } catch (e) {}
 
-    const guestEmail = stateKey === 'quoteState'
+    const guestEmail = (stateKey === 'quoteState' || stateKey === 'emailBookingState')
       ? this.extractEmailAddress(this.selectedEmail.from)
       : (qs.recipientEmail || '').trim();
 
@@ -1178,18 +1162,16 @@ Domus 106`;
       ${this.error ? `<div class="error-banner">${this.error}</div>` : ''}
       ${hero}
       <div class="grid">${cards}</div>
-      <div class="quote-launch" onclick="app.openStandaloneQuote()">
-        <div class="icon">📄</div>
-        <div>
+      <div class="grid" style="margin-top:12px;">
+        <div class="card" onclick="app.openStandaloneQuote()">
+          <div class="icon blue">📄</div>
           <div class="name">Genera preventivo</div>
-          <div class="subtitle">Crea un preventivo senza partire da una mail</div>
+          <div class="card-subtitle">Senza partire da una mail</div>
         </div>
-      </div>
-      <div class="quote-launch" onclick="app.openBookingsList()">
-        <div class="icon">📅</div>
-        <div>
+        <div class="card" onclick="app.openBookingsList()">
+          <div class="icon blue">📅</div>
           <div class="name">Prenotazioni confermate</div>
-          <div class="subtitle">Occupazione e disponibilità a colpo d'occhio</div>
+          <div class="card-subtitle">Occupazione a colpo d'occhio</div>
         </div>
       </div>
       <div class="refresh-row">
@@ -1265,6 +1247,29 @@ Domus 106`;
     }).join('');
 
     const quoteOpen = this.quoteState.open;
+
+    const bs = this.emailBookingState;
+    const bookingSection = `
+      <div class="section-title">Prenotazione</div>
+      <div class="detail-card">
+        <span class="form-label">Nome ospite</span>
+        <input type="text" class="form-input" value="${this.escape(bs.guestName)}" oninput="app.updateQuoteField('emailBookingState','guestName', this.value)">
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <span class="form-label">Check-in</span>
+            <input type="date" class="form-input" value="${bs.checkIn}" oninput="app.updateQuoteField('emailBookingState','checkIn', this.value)">
+          </div>
+          <div style="flex:1;">
+            <span class="form-label">Check-out</span>
+            <input type="date" class="form-input" value="${bs.checkOut}" oninput="app.updateQuoteField('emailBookingState','checkOut', this.value)">
+          </div>
+        </div>
+        <div class="confirm-booking-box">
+          <div class="title">📅 Prenotazione confermata?</div>
+          <div class="subtitle">Salva e aggiungi al Calendario del telefono</div>
+          <button class="btn ${bs.confirmed ? 'confirmed' : ''}" ${bs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('emailBookingState')">${bs.confirming ? 'Un attimo…' : (bs.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+        </div>
+      </div>`;
 
     const quoteHeader = quoteOpen
       ? `<div class="back" onclick="app.toggleQuoteForm()">‹ Preventivo</div>`
@@ -1348,6 +1353,7 @@ Domus 106`;
           <span class="pill tone-${toneClass}">${e.tone}</span>
         </div>
       </div>
+      ${bookingSection}
       ${quoteOpen ? originalMessageSection + quoteSection : quoteSection + originalMessageSection + responsesSection}`;
   }
 
