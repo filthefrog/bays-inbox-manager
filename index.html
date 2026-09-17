@@ -90,6 +90,7 @@
   .booking-row .dates { font-size: 13px; color: var(--text-secondary); }
   .booking-row .dates b { color: var(--text); font-weight: 700; }
   .booking-row .total { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 4px; }
+  .booking-row .rate-info { font-size: 12px; color: var(--text-secondary); }
   .booking-row .code-tag { font-size: 11px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, monospace; margin-top: 6px; letter-spacing: 0.02em; }
   .booking-row .status-tag { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 100px; margin-top: 6px; }
   .status-confermata { background: rgba(52,199,89,0.12); color: var(--green); }
@@ -97,6 +98,16 @@
   .status-conclusa { background: rgba(142,142,147,0.12); color: var(--text-secondary); }
   .status-cancellata { background: rgba(255,59,48,0.12); color: var(--red); }
   .booking-row .dismiss-btn { top: 12px; right: 12px; }
+  .booking-row.has-quick-action { padding-bottom: 44px; }
+  .flag-btn {
+    position: absolute; bottom: 10px; right: 10px;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(52,199,89,0.14); color: var(--green);
+    border: none; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; padding: 0;
+  }
+  .flag-btn:active { background: rgba(52,199,89,0.26); }
 
   .search-bar { position: relative; margin-bottom: 16px; }
   .search-bar input {
@@ -422,6 +433,7 @@ class ACME {
     this.checkoutReviewQueue = [];
     this.currentCheckoutReview = null;
     this.checkoutNoteDraft = '';
+    this.bookingDetailOrigin = null;
   }
 
   emptyQuoteState() {
@@ -444,6 +456,13 @@ class ACME {
   async openBookingsList() {
     this.bookingSearchQuery = '';
     this.view = 'bookingsList';
+    this.render();
+    await this.loadBookings();
+  }
+
+  async openBookingHistory() {
+    this.bookingSearchQuery = '';
+    this.view = 'bookingHistory';
     this.render();
     await this.loadBookings();
   }
@@ -472,16 +491,24 @@ class ACME {
     }
   }
 
-  filteredBookings() {
+  filteredBookings(isHistory) {
     const q = this.bookingSearchQuery.trim().toLowerCase();
-    if (!q) return this.bookings;
-    return this.bookings.filter(b =>
-      (b.code || '').toLowerCase().includes(q) ||
-      (b.guest_name || '').toLowerCase().includes(q)
-    );
+    let list = this.bookings.filter(b => {
+      const status = b.status || 'confermata';
+      const isConcluded = status === 'conclusa' || status === 'cancellata';
+      return isHistory ? isConcluded : !isConcluded;
+    });
+    if (q) {
+      list = list.filter(b =>
+        (b.code || '').toLowerCase().includes(q) ||
+        (b.guest_name || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
   }
 
   openBookingDetail(booking) {
+    this.bookingDetailOrigin = this.view;
     this.selectedBooking = booking;
     this.bookingNotesDraft = booking.notes || '';
     this.bookingStatusDraft = booking.status || 'confermata';
@@ -1188,6 +1215,8 @@ Domus 106`;
           notes: qs.notes || null,
           guests: qs.guests || null,
           paymentStatus: qs.paymentStatus || 'da saldare',
+          ratePerNight: qs.ratePerNight ? parseFloat(qs.ratePerNight) : null,
+          discountPercent: qs.discountPercent ? parseFloat(qs.discountPercent) : null,
           sourceFrom: hasSourceEmail ? this.selectedEmail.from : null,
           sourceSubject: hasSourceEmail ? this.selectedEmail.subject : null,
           sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
@@ -1378,7 +1407,8 @@ Domus 106`;
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
     else if (this.view === 'quoteStandalone') { this.view = 'dashboard'; }
     else if (this.view === 'bookingsList') { this.view = 'dashboard'; }
-    else if (this.view === 'bookingDetail') { this.view = 'bookingsList'; this.selectedBooking = null; }
+    else if (this.view === 'bookingHistory') { this.view = 'dashboard'; }
+    else if (this.view === 'bookingDetail') { this.view = this.bookingDetailOrigin || 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
 
@@ -1545,6 +1575,11 @@ Domus 106`;
           <div class="icon blue">📅</div>
           <div class="name">Prenotazioni confermate</div>
           <div class="card-subtitle">Occupazione a colpo d'occhio</div>
+        </div>
+        <div class="card" onclick="app.openBookingHistory()">
+          <div class="icon gray">🗂️</div>
+          <div class="name">Storico prenotazioni</div>
+          <div class="card-subtitle">Soggiorni conclusi e passati</div>
         </div>
       </div>
       <div class="refresh-row">
@@ -1817,12 +1852,13 @@ Domus 106`;
   }
 
   renderBookingRows() {
-    const list = this.filteredBookings();
+    const isHistory = this.view === 'bookingHistory';
+    const list = this.filteredBookings(isHistory);
     if (this.bookingsLoading) {
       return `<div class="loading"><div class="spinner"></div>Carico le prenotazioni…</div>`;
     }
     if (!list.length) {
-      return `<div class="empty">${this.bookingSearchQuery ? 'Nessuna prenotazione trovata' : 'Nessuna prenotazione confermata ancora'}</div>`;
+      return `<div class="empty">${this.bookingSearchQuery ? 'Nessuna prenotazione trovata' : (isHistory ? 'Nessuna prenotazione conclusa ancora' : 'Nessuna prenotazione confermata ancora')}</div>`;
     }
     return list.map(b => {
       const checkInFmt = this.formatQuoteDate(b.check_in);
@@ -1833,13 +1869,16 @@ Domus 106`;
       const payment = b.payment_status || 'da saldare';
       const paymentClass = 'chip-pay-' + payment.replace(/\s+/g, '-');
       const paymentLabel = payment === 'da saldare' ? 'Da saldare' : (payment === 'acconto versato' ? 'Acconto' : 'Saldata');
+      const showQuickConclude = !isHistory && status !== 'conclusa' && status !== 'cancellata';
       return `
-        <div class="booking-row" onclick='app.openBookingDetail(${safeBooking})'>
+        <div class="booking-row ${showQuickConclude ? 'has-quick-action' : ''}" onclick='app.openBookingDetail(${safeBooking})'>
           <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissBooking(${b.id})'>✕</button>
+          ${showQuickConclude ? `<button class="flag-btn" title="Segna come conclusa" onclick='event.stopPropagation(); app.quickConcludeBooking(${b.id})'>✓</button>` : ''}
           <div class="row-top">
             <div class="name">${this.escape(b.guest_name)}</div>
             ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
           </div>
+          ${b.rate_per_night ? `<div class="rate-info">€ ${Number(b.rate_per_night).toFixed(2)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
           <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
           <div class="chip-row">
             <span class="chip ${statusClass}">${this.escape(status)}</span>
@@ -1851,15 +1890,46 @@ Domus 106`;
     }).join('');
   }
 
+  quickConcludeBooking(id) {
+    const booking = this.bookings.find(b => b.id === id);
+    if (!booking) return;
+    this.showConfirmDialog({
+      title: 'Segnare come conclusa?',
+      desc: `${this.escape(booking.guest_name)} passerà nello storico prenotazioni.`,
+      confirmLabel: 'Conclusa',
+      onConfirm: async () => {
+        try {
+          await fetch('/api/booking', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, status: 'conclusa', checkoutReviewed: true })
+          });
+        } catch (e) {}
+        const idx = this.bookings.findIndex(x => x.id === id);
+        if (idx !== -1) { this.bookings[idx].status = 'conclusa'; this.bookings[idx].checkout_reviewed = true; }
+        const area = document.getElementById('bookingResultsArea');
+        if (area) area.innerHTML = this.renderBookingRows(); else this.render();
+      }
+    });
+  }
+
   renderBookingsList() {
+    return this.renderBookingListView(false, 'Prenotazioni confermate', 'Cerca per codice o nome ospite…');
+  }
+
+  renderBookingHistory() {
+    return this.renderBookingListView(true, 'Storico prenotazioni', 'Cerca nello storico…');
+  }
+
+  renderBookingListView(isHistory, title, placeholder) {
     return `
       <div class="list-header">
         <div class="back" onclick="app.goBack()">‹ ACME</div>
       </div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
-      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Prenotazioni confermate</h1></div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>${title}</h1></div>
       <div class="search-bar">
-        <input type="text" id="bookingSearchInput" placeholder="Cerca per codice o nome ospite…" value="${this.escape(this.bookingSearchQuery)}" oninput="app.updateBookingSearch(this.value)">
+        <input type="text" id="bookingSearchInput" placeholder="${placeholder}" value="${this.escape(this.bookingSearchQuery)}" oninput="app.updateBookingSearch(this.value)">
       </div>
       <div id="bookingResultsArea">${this.renderBookingRows()}</div>`;
   }
@@ -1897,6 +1967,8 @@ Domus 106`;
         <div class="detail-row"><span class="label">Check-out</span><b>${checkOutFmt}</b></div>
         ${b.guests ? `<div class="detail-row"><span class="label">Ospiti</span>${b.guests}</div>` : ''}
         ${b.total ? `<div class="detail-row"><span class="label">Totale</span>€ ${Number(b.total).toFixed(2)}</div>` : ''}
+        ${b.rate_per_night ? `<div class="detail-row"><span class="label">Tariffa</span>€ ${Number(b.rate_per_night).toFixed(2)}/notte</div>` : ''}
+        ${b.discount_percent ? `<div class="detail-row"><span class="label">Sconto</span>${b.discount_percent}%</div>` : ''}
       </div>
       ${hasSource ? `
       <div class="section-title">Nata da questa mail</div>
@@ -1944,6 +2016,7 @@ Domus 106`;
     else if (this.view === 'detail') el.innerHTML = this.renderDetail();
     else if (this.view === 'quoteStandalone') el.innerHTML = this.renderStandaloneQuote();
     else if (this.view === 'bookingsList') el.innerHTML = this.renderBookingsList();
+    else if (this.view === 'bookingHistory') el.innerHTML = this.renderBookingHistory();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     this.updateAppBadge();
   }
