@@ -1,0 +1,14 @@
+name: Controllo email urgenti
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chiama l'endpoint di controllo
+        run: |
+          curl -s -X GET "https://bays-inbox-manager.vercel.app/api/check-urgent?secret=${{ secrets.CRON_SECRET }}"
