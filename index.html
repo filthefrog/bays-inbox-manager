@@ -66,7 +66,30 @@
   .card .count { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
   .card .count.zero { color: var(--text-secondary); }
 
-  .quote-launch {
+  .confirm-booking-box {
+    background: rgba(52,199,89,0.08);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    margin-top: 16px;
+    text-align: center;
+  }
+  .confirm-booking-box .title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .confirm-booking-box .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
+  .confirm-booking-box .btn { background: var(--green); color: white; width: 100%; }
+  .confirm-booking-box .btn.confirmed { background: rgba(52,199,89,0.15); color: var(--green); }
+
+  .booking-row {
+    background: var(--card);
+    border: 1px solid rgba(60,60,67,0.06);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    position: relative;
+  }
+  .booking-row .name { font-size: 15px; font-weight: 600; margin-bottom: 4px; padding-right: 30px; }
+  .booking-row .dates { font-size: 13px; color: var(--text-secondary); }
+  .booking-row .total { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 4px; }
+  .booking-row .dismiss-btn { top: 12px; right: 12px; }
     background: rgba(10,110,189,0.08);
     border-radius: var(--radius-lg);
     padding: 18px 20px;
@@ -343,6 +366,8 @@ class ACME {
     this.quoteState = this.emptyQuoteState();
     this.standaloneQuoteState = this.emptyQuoteState();
     this.pushEnabled = false;
+    this.bookings = [];
+    this.bookingsLoading = false;
   }
 
   emptyQuoteState() {
@@ -358,6 +383,38 @@ class ACME {
   openStandaloneQuote() {
     this.standaloneQuoteState = this.emptyQuoteState();
     this.view = 'quoteStandalone';
+    this.render();
+  }
+
+  async openBookingsList() {
+    this.view = 'bookingsList';
+    this.render();
+    await this.loadBookings();
+  }
+
+  async loadBookings() {
+    this.bookingsLoading = true;
+    this.render();
+    try {
+      const res = await fetch('/api/booking');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) this.bookings = data.bookings || [];
+    } catch (e) {
+      this.error = 'Impossibile caricare le prenotazioni';
+    }
+    this.bookingsLoading = false;
+    this.render();
+  }
+
+  async dismissBooking(id) {
+    try {
+      await fetch('/api/booking', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+    } catch (e) {}
+    this.bookings = this.bookings.filter(b => b.id !== id);
     this.render();
   }
 
@@ -745,6 +802,32 @@ Domus 106`;
     this.render();
   }
 
+  buildICS({ guestName, checkIn, checkOut, guestEmail, total }) {
+    const fmtDate = (d) => d.replace(/-/g, '');
+    const uid = `acme-${checkIn}-${guestName.replace(/\s+/g, '')}-${Date.now()}@domus106`;
+    const dtstamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const descParts = [];
+    if (guestEmail) descParts.push('Email ospite: ' + guestEmail);
+    if (total) descParts.push('Totale: € ' + Number(total).toFixed(2));
+    descParts.push('Creato da ACME Inbox Manager');
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Domus 106//ACME//IT',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${dtstamp}`,
+      `DTSTART;VALUE=DATE:${fmtDate(checkIn)}`,
+      `DTEND;VALUE=DATE:${fmtDate(checkOut)}`,
+      `SUMMARY:Prenotazione: ${guestName} — Domus 106`,
+      `DESCRIPTION:${descParts.join('\\n')}`,
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ];
+    return lines.join('\r\n');
+  }
+
   async confirmBooking(stateKey) {
     const qs = this[stateKey];
     const { guestName, checkIn, checkOut } = qs;
@@ -771,13 +854,21 @@ Domus 106`;
     this.error = null;
     this.render();
     try {
-      const res = await fetch('/api/create-calendar-event', {
+      // 1) salva nell'archivio interno, per la sezione "Prenotazioni confermate"
+      const res = await fetch('/api/booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guestName, checkIn, checkOut, guestEmail, total })
+        body: JSON.stringify({ guestName, guestEmail, checkIn, checkOut, total })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Creazione evento fallita');
+      if (!res.ok) throw new Error(data.error || 'Salvataggio prenotazione fallito');
+
+      // 2) apre la schermata "Aggiungi a Calendario" nativa dell'iPhone
+      const icsContent = this.buildICS({ guestName, checkIn, checkOut, guestEmail, total });
+      const blob = new Blob([icsContent], { type: 'text/calendar' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+
       qs.confirmed = true;
     } catch (e) {
       this.error = e.message;
@@ -907,6 +998,7 @@ Domus 106`;
     if (this.view === 'detail') { this.view = 'emails'; this.selectedEmail = null; }
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
     else if (this.view === 'quoteStandalone') { this.view = 'dashboard'; }
+    else if (this.view === 'bookingsList') { this.view = 'dashboard'; }
     this.render();
   }
 
@@ -1078,6 +1170,13 @@ Domus 106`;
           <div class="subtitle">Crea un preventivo senza partire da una mail</div>
         </div>
       </div>
+      <div class="quote-launch" onclick="app.openBookingsList()">
+        <div class="icon">📅</div>
+        <div>
+          <div class="name">Prenotazioni confermate</div>
+          <div class="subtitle">Occupazione e disponibilità a colpo d'occhio</div>
+        </div>
+      </div>
       <div class="refresh-row">
         <div class="status">${updatedText}</div>
         <button class="icon-btn" onclick="app.loadEmails()">↻</button>
@@ -1184,8 +1283,10 @@ Domus 106`;
           <div class="btn-row">
             <button class="btn btn-secondary" ${this.quoteState.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('quoteState')">${this.quoteState.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
           </div>
-          <div class="btn-row">
-            <button class="btn ${this.quoteState.confirmed ? 'btn-send sent' : 'btn-secondary'}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Aggiungo al calendario…' : (this.quoteState.confirmed ? '✓ In calendario' : '✅ Conferma prenotazione')}</button>
+          <div class="confirm-booking-box">
+            <div class="title">📅 Prenotazione confermata?</div>
+            <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
+            <button class="btn ${this.quoteState.confirmed ? 'confirmed' : ''}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Un attimo…' : (this.quoteState.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
           </div>
         `}
       </div>`;
@@ -1266,15 +1367,39 @@ Domus 106`;
           <div class="btn-row">
             <button class="btn btn-secondary" ${qs.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('standaloneQuoteState')">${qs.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
           </div>
-          <div class="btn-row">
-            <button class="btn ${qs.confirmed ? 'btn-send sent' : 'btn-secondary'}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Aggiungo al calendario…' : (qs.confirmed ? '✓ In calendario' : '✅ Conferma prenotazione')}</button>
+          <div class="confirm-booking-box">
+            <div class="title">📅 Prenotazione confermata?</div>
+            <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
+            <button class="btn ${qs.confirmed ? 'confirmed' : ''}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Un attimo…' : (qs.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
           </div>
         `}
       </div>`;
   }
 
+  renderBookingsList() {
+    const rows = this.bookings.map(b => {
+      const checkInFmt = this.formatQuoteDate(b.check_in);
+      const checkOutFmt = this.formatQuoteDate(b.check_out);
+      return `
+        <div class="booking-row">
+          <button class="dismiss-btn" onclick="app.dismissBooking(${b.id})">✕</button>
+          <div class="name">${this.escape(b.guest_name)}</div>
+          <div class="dates">${checkInFmt} → ${checkOutFmt}</div>
+          ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ACME</div>
+      </div>
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Prenotazioni confermate</h1></div>
+      ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Carico le prenotazioni…</div>`
+        : rows ? rows : `<div class="empty">Nessuna prenotazione confermata ancora</div>`}`;
+  }
+
   formatDate(dateStr, full) {
-    if (!dateStr) return '';
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return '';
     if (full) {
@@ -1298,6 +1423,7 @@ Domus 106`;
     else if (this.view === 'emails') el.innerHTML = this.renderEmails();
     else if (this.view === 'detail') el.innerHTML = this.renderDetail();
     else if (this.view === 'quoteStandalone') el.innerHTML = this.renderStandaloneQuote();
+    else if (this.view === 'bookingsList') el.innerHTML = this.renderBookingsList();
     this.updateAppBadge();
   }
 
