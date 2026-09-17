@@ -38,12 +38,7 @@
   .topbar .eyebrow { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 2px; }
   .topbar h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
 
-  /* Dashboard grid - the heart */
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .card {
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
@@ -77,20 +72,39 @@
   .confirm-booking-box .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
   .confirm-booking-box .btn { background: var(--green); color: white; width: 100%; }
   .confirm-booking-box .btn.confirmed { background: rgba(52,199,89,0.15); color: var(--green); }
+  .confirm-booking-box .code-line { font-size: 13px; color: var(--text-secondary); margin-top: 10px; }
+  .confirm-booking-box .code-line b { color: var(--text); font-family: ui-monospace, SFMono-Regular, monospace; letter-spacing: 0.02em; }
 
   .booking-row {
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
     border-radius: var(--radius-md);
-    padding: 14px 16px;
+    padding: 14px 44px 14px 16px;
     margin-bottom: 10px;
     position: relative;
+    cursor: pointer;
+    transition: transform 0.15s ease;
   }
+  .booking-row:active { transform: scale(0.98); }
   .booking-row .name { font-size: 15px; font-weight: 600; margin-bottom: 4px; padding-right: 30px; }
   .booking-row .dates { font-size: 13px; color: var(--text-secondary); }
+  .booking-row .dates b { color: var(--text); font-weight: 700; }
   .booking-row .total { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 4px; }
+  .booking-row .code-tag { font-size: 11px; color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, monospace; margin-top: 6px; letter-spacing: 0.02em; }
+  .booking-row .status-tag { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 100px; margin-top: 6px; }
+  .status-confermata { background: rgba(52,199,89,0.12); color: var(--green); }
+  .status-in-arrivo { background: rgba(10,110,189,0.12); color: var(--accent); }
+  .status-conclusa { background: rgba(142,142,147,0.12); color: var(--text-secondary); }
+  .status-cancellata { background: rgba(255,59,48,0.12); color: var(--red); }
   .booking-row .dismiss-btn { top: 12px; right: 12px; }
-  .card .card-subtitle { font-size: 11px; color: var(--text-secondary); line-height: 1.3; margin-top: 2px; }
+
+  .search-bar { position: relative; margin-bottom: 16px; }
+  .search-bar input {
+    width: 100%; padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid var(--border);
+    font-size: 15px; background: var(--card); color: var(--text);
+  }
+
+  .hero-card {
     background: var(--card);
     border: 1px solid rgba(60,60,67,0.06);
     border-radius: var(--radius-lg);
@@ -138,7 +152,6 @@
     font-size: 15px; cursor: pointer;
   }
 
-  /* List views */
   .list-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
   .back { font-size: 17px; color: var(--accent); font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 4px; }
   .list-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
@@ -178,7 +191,6 @@
   }
   .dismiss-btn:active { background: rgba(60,60,67,0.16); }
 
-  /* Detail view */
   .detail-card {
     background: var(--card);
     border-radius: var(--radius-lg);
@@ -229,14 +241,8 @@
     min-height: 110px;
     color: var(--text);
   }
-  .response-card .body-text:focus {
-    outline: none;
-    border-color: var(--accent);
-    background: var(--card);
-  }
-  .response-card .body-text:disabled {
-    opacity: 0.7;
-  }
+  .response-card .body-text:focus { outline: none; border-color: var(--accent); background: var(--card); }
+  .response-card .body-text:disabled { opacity: 0.7; }
   .sent-confirm {
     background: rgba(52,199,89,0.12); color: var(--green);
     padding: 12px; border-radius: var(--radius-sm); font-size: 13px; margin-top: 10px;
@@ -278,9 +284,7 @@
   .btn-reject { background: rgba(255,59,48,0.1); color: var(--red); }
   .btn-secondary { background: rgba(10,110,189,0.1); color: var(--accent); }
 
-  .empty, .loading, .login-box {
-    text-align: center; padding: 60px 20px; color: var(--text-secondary);
-  }
+  .empty, .loading, .login-box { text-align: center; padding: 60px 20px; color: var(--text-secondary); }
   .spinner {
     width: 28px; height: 28px; border-radius: 50%;
     border: 3px solid rgba(0,0,0,0.08); border-top-color: var(--accent);
@@ -304,6 +308,7 @@
     width: 100%; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
     font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text); margin-bottom: 10px;
   }
+  select.form-input { -webkit-appearance: none; appearance: none; }
   .form-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; display: block; }
   .quote-preview { background: var(--bg); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; }
   .quote-preview .detail-row:last-child { margin-bottom: 0; }
@@ -313,6 +318,20 @@
     padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px;
   }
 
+  .code-hero { text-align: center; padding: 6px 0 4px; }
+  .code-hero .code-value {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 22px; font-weight: 700; letter-spacing: 0.03em;
+    background: rgba(10,110,189,0.08); color: var(--accent);
+    padding: 10px 16px; border-radius: var(--radius-sm); display: inline-block; margin-top: 6px;
+  }
+  .source-email-box {
+    background: var(--bg); border-radius: var(--radius-sm); padding: 12px; margin-top: 4px;
+    font-size: 13px; line-height: 1.5;
+  }
+  .source-email-box .src-subject { font-weight: 600; margin-bottom: 4px; }
+  .source-email-box .src-body { color: var(--text-secondary); }
+
   .settings-card {
     background: var(--card);
     border-radius: var(--radius-lg);
@@ -320,11 +339,7 @@
     margin-top: 20px;
     border: 1px solid rgba(60,60,67,0.06);
   }
-  .settings-row {
-    display: flex; align-items: center; gap: 12px;
-    padding: 13px 16px;
-    cursor: pointer;
-  }
+  .settings-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; }
   .settings-row:active { background: var(--bg); }
   .settings-row + .settings-row { border-top: 1px solid rgba(60,60,67,0.08); }
   .settings-row .settings-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
@@ -347,6 +362,8 @@ const CATEGORY_META = {
   'Cancellazione':           { icon: '❌', color: 'gray' }
 };
 
+const BOOKING_STATUSES = ['confermata', 'in arrivo', 'conclusa', 'cancellata'];
+
 const VAPID_PUBLIC_KEY = "BAUiDQRLOp24qASDBM3nbZp39PPaZdfaCSC0Fcx9u79ervwtSp7apDxmMo_aV-V-4qVXOH7wB4ck598mmBgJcSU";
 
 class ACME {
@@ -365,6 +382,11 @@ class ACME {
     this.pushEnabled = false;
     this.bookings = [];
     this.bookingsLoading = false;
+    this.bookingSearchQuery = '';
+    this.selectedBooking = null;
+    this.bookingNotesDraft = '';
+    this.bookingStatusDraft = '';
+    this.bookingSaving = false;
   }
 
   emptyQuoteState() {
@@ -372,7 +394,7 @@ class ACME {
       open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
-      confirming: false, confirmed: false,
+      confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
     };
   }
@@ -384,6 +406,7 @@ class ACME {
   }
 
   async openBookingsList() {
+    this.bookingSearchQuery = '';
     this.view = 'bookingsList';
     this.render();
     await this.loadBookings();
@@ -401,6 +424,59 @@ class ACME {
     }
     this.bookingsLoading = false;
     this.render();
+  }
+
+  updateBookingSearch(value) {
+    this.bookingSearchQuery = value;
+    this.render();
+  }
+
+  filteredBookings() {
+    const q = this.bookingSearchQuery.trim().toLowerCase();
+    if (!q) return this.bookings;
+    return this.bookings.filter(b =>
+      (b.code || '').toLowerCase().includes(q) ||
+      (b.guest_name || '').toLowerCase().includes(q)
+    );
+  }
+
+  openBookingDetail(booking) {
+    this.selectedBooking = booking;
+    this.bookingNotesDraft = booking.notes || '';
+    this.bookingStatusDraft = booking.status || 'confermata';
+    this.view = 'bookingDetail';
+    this.render();
+  }
+
+  async saveBookingDetail() {
+    const b = this.selectedBooking;
+    this.bookingSaving = true;
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/booking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: b.id, notes: this.bookingNotesDraft, status: this.bookingStatusDraft })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Salvataggio fallito');
+      this.selectedBooking = data.booking;
+      const idx = this.bookings.findIndex(x => x.id === b.id);
+      if (idx !== -1) this.bookings[idx] = data.booking;
+    } catch (e) {
+      this.error = e.message;
+    }
+    this.bookingSaving = false;
+    this.render();
+  }
+
+  copyBookingCode(btn, code) {
+    const original = btn.textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      btn.textContent = '✓ Copiato';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }).catch(() => {});
   }
 
   async dismissBooking(id) {
@@ -440,10 +516,6 @@ class ACME {
     setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
   }
 
-  // Aggiornamento automatico ogni 5 minuti: solo se si è fermi sulla dashboard
-  // (mai mentre si scrive una risposta o un preventivo), e senza mostrare la
-  // schermata di caricamento — sfrutta la stessa cache, quindi non chiama
-  // Claude per le email già viste.
   async silentRefresh() {
     if (this.view !== 'dashboard') return;
     try {
@@ -455,9 +527,7 @@ class ACME {
       this.byCategory = data.byCategory || {};
       this.lastUpdated = new Date();
       if (this.view === 'dashboard') this.render();
-    } catch (e) {
-      // controllo silenzioso in background, non mostriamo errori di rete transitori
-    }
+    } catch (e) {}
   }
 
   saveKey() {
@@ -656,15 +726,9 @@ Domus 106`;
     if (!checkIn || !checkOut) return;
     try {
       const nights = this.computeNightsPreview(checkIn, checkOut);
-      if (!qs.rateTouched) {
-        qs.ratePerNight = String(this.suggestRatePreview(checkIn));
-      }
-      if (!qs.discountTouched) {
-        qs.discountPercent = String(nights >= 30 ? 30 : (nights >= 7 ? 15 : 0));
-      }
-    } catch (e) {
-      // date non ancora valide insieme, non facciamo nulla
-    }
+      if (!qs.rateTouched) qs.ratePerNight = String(this.suggestRatePreview(checkIn));
+      if (!qs.discountTouched) qs.discountPercent = String(nights >= 30 ? 30 : (nights >= 7 ? 15 : 0));
+    } catch (e) {}
   }
 
   refreshQuotePreview(stateKey) {
@@ -787,9 +851,7 @@ Domus 106`;
         }
       } catch (shareErr) {
         if (shareErr.name === 'AbortError') {
-          // l'utente ha chiuso il foglio di condivisione, nessun errore da mostrare
         } else {
-          // ripiego: apri il PDF in una nuova scheda, da lì si può comunque salvare/condividere a mano
           const url = URL.createObjectURL(file);
           window.open(url, '_blank');
         }
@@ -845,13 +907,11 @@ Domus 106`;
       total = subtotal - discountAmount;
     } catch (e) {}
 
-    const guestEmail = (stateKey === 'quoteState' || stateKey === 'emailBookingState')
+    const hasSourceEmail = (stateKey === 'quoteState' || stateKey === 'emailBookingState') && this.selectedEmail;
+    const guestEmail = hasSourceEmail
       ? this.extractEmailAddress(this.selectedEmail.from)
       : (qs.recipientEmail || '').trim();
 
-    // 1) Apri SUBITO la schermata "Aggiungi a Calendario", prima di qualunque
-    //    attesa di rete — se passa troppo tempo dal tocco, iOS blocca l'apertura
-    //    in silenzio, quindi questo deve essere il primissimo passo, istantaneo.
     const icsContent = this.buildICS({ guestName, checkIn, checkOut, guestEmail, total });
     const blob = new Blob([icsContent], { type: 'text/calendar' });
     const url = URL.createObjectURL(blob);
@@ -865,16 +925,21 @@ Domus 106`;
     this.error = null;
     this.render();
     try {
-      // 2) salva nell'archivio interno, per la sezione "Prenotazioni confermate" — ora in background
       const res = await fetch('/api/booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guestName, guestEmail, checkIn, checkOut, total })
+        body: JSON.stringify({
+          guestName, guestEmail, checkIn, checkOut, total,
+          sourceFrom: hasSourceEmail ? this.selectedEmail.from : null,
+          sourceSubject: hasSourceEmail ? this.selectedEmail.subject : null,
+          sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Salvataggio prenotazione fallito');
 
       qs.confirmed = true;
+      qs.confirmedCode = (data.booking && data.booking.code) || null;
     } catch (e) {
       this.error = e.message;
     }
@@ -1004,6 +1069,7 @@ Domus 106`;
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
     else if (this.view === 'quoteStandalone') { this.view = 'dashboard'; }
     else if (this.view === 'bookingsList') { this.view = 'dashboard'; }
+    else if (this.view === 'bookingDetail') { this.view = 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
 
@@ -1027,17 +1093,11 @@ Domus 106`;
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       this.pushEnabled = !!sub;
-    } catch (e) {
-      // niente di grave, restano semplicemente disattivate
-    }
+    } catch (e) {}
   }
 
   async togglePushNotifications() {
-    if (this.pushEnabled) {
-      await this.disablePush();
-    } else {
-      await this.enablePush();
-    }
+    if (this.pushEnabled) { await this.disablePush(); } else { await this.enablePush(); }
   }
 
   async enablePush() {
@@ -1096,8 +1156,6 @@ Domus 106`;
     this.view = 'setup';
     this.render();
   }
-
-  // ---------- RENDER ----------
 
   renderSetup() {
     return `
@@ -1274,6 +1332,7 @@ Domus 106`;
           <div class="title">📅 Prenotazione confermata?</div>
           <div class="subtitle">Salva e aggiungi al Calendario del telefono</div>
           <button class="btn ${bs.confirmed ? 'confirmed' : ''}" ${bs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('emailBookingState')">${bs.confirming ? 'Un attimo…' : (bs.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+          ${bs.confirmed && bs.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${bs.confirmedCode}</b></div>` : ''}
         </div>
       </div>`;
 
@@ -1329,6 +1388,7 @@ Domus 106`;
             <div class="title">📅 Prenotazione confermata?</div>
             <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
             <button class="btn ${this.quoteState.confirmed ? 'confirmed' : ''}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Un attimo…' : (this.quoteState.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+            ${this.quoteState.confirmed && this.quoteState.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${this.quoteState.confirmedCode}</b></div>` : ''}
           </div>
         `}
       </div>`;
@@ -1414,21 +1474,28 @@ Domus 106`;
             <div class="title">📅 Prenotazione confermata?</div>
             <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
             <button class="btn ${qs.confirmed ? 'confirmed' : ''}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Un attimo…' : (qs.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+            ${qs.confirmed && qs.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${qs.confirmedCode}</b></div>` : ''}
           </div>
         `}
       </div>`;
   }
 
   renderBookingsList() {
-    const rows = this.bookings.map(b => {
+    const list = this.filteredBookings();
+    const rows = list.map(b => {
       const checkInFmt = this.formatQuoteDate(b.check_in);
       const checkOutFmt = this.formatQuoteDate(b.check_out);
+      const safeBooking = JSON.stringify(b).replace(/'/g, "&#39;");
+      const status = b.status || 'confermata';
+      const statusClass = 'status-' + status.replace(/\s+/g, '-');
       return `
-        <div class="booking-row">
-          <button class="dismiss-btn" onclick="app.dismissBooking(${b.id})">✕</button>
+        <div class="booking-row" onclick='app.openBookingDetail(${safeBooking})'>
+          <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissBooking(${b.id})'>✕</button>
           <div class="name">${this.escape(b.guest_name)}</div>
-          <div class="dates">${checkInFmt} → ${checkOutFmt}</div>
+          <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
           ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+          ${b.code ? `<div class="code-tag">${this.escape(b.code)}</div>` : ''}
+          <span class="status-tag ${statusClass}">${this.escape(status)}</span>
         </div>`;
     }).join('');
 
@@ -1438,8 +1505,60 @@ Domus 106`;
       </div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Prenotazioni confermate</h1></div>
+      <div class="search-bar">
+        <input type="text" placeholder="Cerca per codice o nome ospite…" value="${this.escape(this.bookingSearchQuery)}" oninput="app.updateBookingSearch(this.value)">
+      </div>
       ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Carico le prenotazioni…</div>`
-        : rows ? rows : `<div class="empty">Nessuna prenotazione confermata ancora</div>`}`;
+        : rows ? rows : `<div class="empty">${this.bookingSearchQuery ? 'Nessuna prenotazione trovata' : 'Nessuna prenotazione confermata ancora'}</div>`}`;
+  }
+
+  renderBookingDetail() {
+    const b = this.selectedBooking;
+    const checkInFmt = this.formatQuoteDate(b.check_in);
+    const checkOutFmt = this.formatQuoteDate(b.check_out);
+    const hasSource = b.source_subject || b.source_from || b.source_body;
+    const statusOptions = BOOKING_STATUSES.map(s =>
+      `<option value="${s}" ${this.bookingStatusDraft === s ? 'selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
+    ).join('');
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ Prenotazioni</div>
+      </div>
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      <div class="detail-card">
+        <div class="code-hero">
+          <div class="form-label" style="margin-bottom:0;">Codice prenotazione</div>
+          <div class="code-value">${this.escape(b.code || '—')}</div>
+          <div style="margin-top:8px;">
+            <button class="btn btn-secondary" style="width:auto; padding:8px 16px; flex:none;" onclick="app.copyBookingCode(this, '${b.code || ''}')">Copia codice</button>
+          </div>
+        </div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-row"><span class="label">Ospite</span>${this.escape(b.guest_name)}</div>
+        ${b.guest_email ? `<div class="detail-row"><span class="label">Email</span>${this.escape(b.guest_email)}</div>` : ''}
+        <div class="detail-row"><span class="label">Check-in</span><b>${checkInFmt}</b></div>
+        <div class="detail-row"><span class="label">Check-out</span><b>${checkOutFmt}</b></div>
+        ${b.total ? `<div class="detail-row"><span class="label">Totale</span>€ ${Number(b.total).toFixed(2)}</div>` : ''}
+      </div>
+      ${hasSource ? `
+      <div class="section-title">Nata da questa mail</div>
+      <div class="detail-card">
+        <div class="source-email-box">
+          ${b.source_from ? `<div>${this.escape(b.source_from)}</div>` : ''}
+          ${b.source_subject ? `<div class="src-subject">${this.escape(b.source_subject)}</div>` : ''}
+          ${b.source_body ? `<div class="src-body">${this.escape(b.source_body)}</div>` : ''}
+        </div>
+      </div>` : ''}
+      <div class="section-title">Stato e note</div>
+      <div class="detail-card">
+        <span class="form-label">Stato</span>
+        <select class="form-input" onchange="app.bookingStatusDraft = this.value">${statusOptions}</select>
+        <span class="form-label">Note</span>
+        <textarea class="form-input" style="min-height:90px; resize:vertical;" placeholder="Es. arriva in ritardo, ha chiesto una culla…" oninput="app.bookingNotesDraft = this.value">${this.escape(this.bookingNotesDraft)}</textarea>
+        <button class="btn btn-primary" ${this.bookingSaving ? 'disabled' : ''} onclick="app.saveBookingDetail()">${this.bookingSaving ? 'Salvataggio…' : 'Salva modifiche'}</button>
+      </div>`;
   }
 
   formatDate(dateStr, full) {
@@ -1467,20 +1586,17 @@ Domus 106`;
     else if (this.view === 'detail') el.innerHTML = this.renderDetail();
     else if (this.view === 'quoteStandalone') el.innerHTML = this.renderStandaloneQuote();
     else if (this.view === 'bookingsList') el.innerHTML = this.renderBookingsList();
+    else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     this.updateAppBadge();
   }
 
-  // Numero rosso sull'icona in home, come l'app Mail — riflette il totale
-  // delle email non ancora gestite in tutte le categorie
   updateAppBadge() {
     if (!('setAppBadge' in navigator)) return;
     try {
       const total = Object.keys(CATEGORY_META).reduce((sum, cat) => sum + this.unresolvedCount(cat), 0);
       if (total > 0) navigator.setAppBadge(total).catch(() => {});
       else if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {});
-    } catch (e) {
-      // badge non supportato su questo dispositivo, nessun problema
-    }
+    } catch (e) {}
   }
 }
 
