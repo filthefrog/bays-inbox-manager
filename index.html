@@ -394,6 +394,7 @@ class ACME {
       open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
+      notes: '',
       confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
     };
@@ -428,7 +429,12 @@ class ACME {
 
   updateBookingSearch(value) {
     this.bookingSearchQuery = value;
-    this.render();
+    const area = document.getElementById('bookingResultsArea');
+    if (area) {
+      area.innerHTML = this.renderBookingRows();
+    } else {
+      this.render();
+    }
   }
 
   filteredBookings() {
@@ -969,6 +975,7 @@ Domus 106`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           guestName, guestEmail, checkIn, checkOut, total,
+          notes: qs.notes || null,
           sourceFrom: hasSourceEmail ? this.selectedEmail.from : null,
           sourceSubject: hasSourceEmail ? this.selectedEmail.subject : null,
           sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
@@ -1374,6 +1381,8 @@ Domus 106`;
             <input type="date" class="form-input" value="${bs.checkOut}" oninput="app.updateQuoteField('emailBookingState','checkOut', this.value)">
           </div>
         </div>
+        <span class="form-label">Note</span>
+        <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('emailBookingState','notes', this.value)">${this.escape(bs.notes)}</textarea>
         <div class="confirm-booking-box">
           <div class="title">📅 Prenotazione confermata?</div>
           <div class="subtitle">Salva e aggiungi al Calendario del telefono</div>
@@ -1406,6 +1415,8 @@ Domus 106`;
               <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('quoteState','checkOut', this.value)">
             </div>
           </div>
+          <span class="form-label">Note</span>
+          <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('quoteState','notes', this.value)">${this.escape(this.quoteState.notes)}</textarea>
           <div style="display:flex; gap:10px;">
             <div style="flex:1;">
               <span class="form-label">Tariffa/notte (€)</span>
@@ -1496,6 +1507,8 @@ Domus 106`;
               <input type="date" class="form-input" value="${qs.checkOut}" oninput="app.updateQuoteField('standaloneQuoteState','checkOut', this.value)">
             </div>
           </div>
+          <span class="form-label">Note</span>
+          <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('standaloneQuoteState','notes', this.value)">${this.escape(qs.notes)}</textarea>
           <div style="display:flex; gap:10px;">
             <div style="flex:1;">
               <span class="form-label">Tariffa/notte (€)</span>
@@ -1526,9 +1539,15 @@ Domus 106`;
       </div>`;
   }
 
-  renderBookingsList() {
+  renderBookingRows() {
     const list = this.filteredBookings();
-    const rows = list.map(b => {
+    if (this.bookingsLoading) {
+      return `<div class="loading"><div class="spinner"></div>Carico le prenotazioni…</div>`;
+    }
+    if (!list.length) {
+      return `<div class="empty">${this.bookingSearchQuery ? 'Nessuna prenotazione trovata' : 'Nessuna prenotazione confermata ancora'}</div>`;
+    }
+    return list.map(b => {
       const checkInFmt = this.formatQuoteDate(b.check_in);
       const checkOutFmt = this.formatQuoteDate(b.check_out);
       const safeBooking = JSON.stringify(b).replace(/'/g, "&#39;");
@@ -1544,7 +1563,9 @@ Domus 106`;
           <span class="status-tag ${statusClass}">${this.escape(status)}</span>
         </div>`;
     }).join('');
+  }
 
+  renderBookingsList() {
     return `
       <div class="list-header">
         <div class="back" onclick="app.goBack()">‹ ACME</div>
@@ -1552,10 +1573,9 @@ Domus 106`;
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Prenotazioni confermate</h1></div>
       <div class="search-bar">
-        <input type="text" placeholder="Cerca per codice o nome ospite…" value="${this.escape(this.bookingSearchQuery)}" oninput="app.updateBookingSearch(this.value)">
+        <input type="text" id="bookingSearchInput" placeholder="Cerca per codice o nome ospite…" value="${this.escape(this.bookingSearchQuery)}" oninput="app.updateBookingSearch(this.value)">
       </div>
-      ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Carico le prenotazioni…</div>`
-        : rows ? rows : `<div class="empty">${this.bookingSearchQuery ? 'Nessuna prenotazione trovata' : 'Nessuna prenotazione confermata ancora'}</div>`}`;
+      <div id="bookingResultsArea">${this.renderBookingRows()}</div>`;
   }
 
   renderBookingDetail() {
