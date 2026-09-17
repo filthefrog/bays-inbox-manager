@@ -25,10 +25,24 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const { code } = req.query || {};
-      const path = code
-        ? `confirmed_bookings?select=*&code=eq.${encodeURIComponent(code)}`
-        : `confirmed_bookings?select=*&order=check_in.asc`;
+      const { code, needsReview, guestEmail } = req.query || {};
+      let path;
+      if (code) {
+        path = `confirmed_bookings?select=*&code=eq.${encodeURIComponent(code)}`;
+      } else if (needsReview === 'true') {
+        // Prenotazioni il cui check-out è arrivato (oggi o prima), non ancora
+        // rivisitate e non cancellate — usate per il pop-up "Com'è andato il
+        // soggiorno?" che compare all'apertura dell'app.
+        const today = new Date().toISOString().slice(0, 10);
+        path = `confirmed_bookings?select=*&check_out=lte.${today}&status=neq.cancellata&or=(checkout_reviewed.is.null,checkout_reviewed.eq.false)&order=check_out.asc`;
+      } else if (guestEmail) {
+        // Storico dell'ospite: soggiorni precedenti con questa email, i più
+        // recenti prima — usato per avvisare se un ospite che ha già dato
+        // problemi in passato sta prenotando di nuovo.
+        path = `confirmed_bookings?select=*&guest_email=eq.${encodeURIComponent(guestEmail)}&order=check_out.desc&limit=5`;
+      } else {
+        path = `confirmed_bookings?select=*&order=check_in.asc`;
+      }
       const resp = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
       });
@@ -42,7 +56,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const {
       guestName, guestEmail, checkIn, checkOut, total,
-      sourceFrom, sourceSubject, sourceBody, notes, guests
+      sourceFrom, sourceSubject, sourceBody, notes, guests, paymentStatus
     } = req.body;
     if (!guestName || !checkIn || !checkOut) {
       return res.status(400).json({ error: 'Nome ospite, check-in e check-out sono obbligatori' });
@@ -72,6 +86,7 @@ export default async function handler(req, res) {
             status: 'confermata',
             notes: notes || null,
             guests: guests || null,
+            payment_status: paymentStatus || 'da saldare',
             source_from: sourceFrom || null,
             source_subject: sourceSubject || null,
             source_body: sourceBody || null
@@ -95,11 +110,13 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { id, notes, status } = req.body || {};
+    const { id, notes, status, checkoutReviewed, paymentStatus } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id mancante' });
     const patch = {};
     if (notes !== undefined) patch.notes = notes;
     if (status !== undefined) patch.status = status;
+    if (checkoutReviewed !== undefined) patch.checkout_reviewed = checkoutReviewed;
+    if (paymentStatus !== undefined) patch.payment_status = paymentStatus;
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
     try {
       const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
