@@ -970,9 +970,15 @@ Domus 106`;
     this.error = null;
     this.render();
     try {
+      // keepalive: true — la richiesta deve arrivare a destinazione anche se
+      // iOS mette la pagina in background subito dopo aver aperto il foglio
+      // "Aggiungi a Calendario" (altrimenti la fetch può restare sospesa e
+      // sembrare che non sia successo nulla, pur avendo salvato più tardi
+      // — o mai).
       const res = await fetch('/api/booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
         body: JSON.stringify({
           guestName, guestEmail, checkIn, checkOut, total,
           notes: qs.notes || null,
@@ -986,11 +992,30 @@ Domus 106`;
 
       qs.confirmed = true;
       qs.confirmedCode = (data.booking && data.booking.code) || null;
+      this.showBookingSavedConfirmation(true, qs.confirmedCode);
     } catch (e) {
       this.error = e.message;
+      this.showBookingSavedConfirmation(false, null, e.message);
     }
     qs.confirming = false;
     this.render();
+  }
+
+  showBookingSavedConfirmation(success, code, errorMsg) {
+    const overlay = document.getElementById('confirmOverlay');
+    const icon = success ? '✅' : '⚠️';
+    const title = success ? 'Prenotazione salvata' : 'Salvataggio non riuscito';
+    const desc = success
+      ? (code ? `Codice prenotazione: <b>${code}</b>. La trovi anche in "Prenotazioni confermate".` : 'Salvata nell\'archivio interno.')
+      : (this.escape(errorMsg || '') || 'Controlla la connessione e riprova.');
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">${icon}</div>
+        <h3>${title}</h3>
+        <p>${desc}</p>
+        <button class="btn btn-primary" onclick="app.closeConfirmModal()">OK</button>
+      </div>`;
+    overlay.classList.remove('hidden');
   }
 
   async sendQuote(stateKey) {
