@@ -350,6 +350,7 @@ class ACME {
       open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
+      confirming: false, confirmed: false,
       sending: false, sent: false
     };
   }
@@ -659,13 +660,14 @@ Domus 106`;
     this.error = null;
     this.render();
     try {
-      const res = await fetch('/api/generate-quote-message', {
+      const res = await fetch('/api/quote', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-claude-key': localStorage.getItem('claude_api_key')
         },
         body: JSON.stringify({
+          action: 'message',
           originalSubject: this.selectedEmail.subject,
           originalBody: this.selectedEmail.body,
           guestName,
@@ -703,10 +705,10 @@ Domus 106`;
     this.error = null;
     this.render();
     try {
-      const res = await fetch('/api/generate-quote-pdf', {
+      const res = await fetch('/api/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guestName, checkIn, checkOut, ratePerNight, discountPercent })
+        body: JSON.stringify({ action: 'pdf', guestName, checkIn, checkOut, ratePerNight, discountPercent })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Generazione PDF fallita');
@@ -743,6 +745,47 @@ Domus 106`;
     this.render();
   }
 
+  async confirmBooking(stateKey) {
+    const qs = this[stateKey];
+    const { guestName, checkIn, checkOut } = qs;
+    if (!guestName || !checkIn || !checkOut) {
+      this.error = 'Compila nome ospite, check-in e check-out prima di confermare';
+      this.render();
+      return;
+    }
+    let total = null;
+    try {
+      const nights = this.computeNightsPreview(checkIn, checkOut);
+      const rate = parseFloat(qs.ratePerNight) || 0;
+      const discount = parseFloat(qs.discountPercent) || 0;
+      const subtotal = nights * rate;
+      const discountAmount = Math.round(subtotal * discount) / 100;
+      total = subtotal - discountAmount;
+    } catch (e) {}
+
+    const guestEmail = stateKey === 'quoteState'
+      ? this.extractEmailAddress(this.selectedEmail.from)
+      : (qs.recipientEmail || '').trim();
+
+    qs.confirming = true;
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/create-calendar-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestName, checkIn, checkOut, guestEmail, total })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Creazione evento fallita');
+      qs.confirmed = true;
+    } catch (e) {
+      this.error = e.message;
+    }
+    qs.confirming = false;
+    this.render();
+  }
+
   async sendQuote(stateKey) {
     const qs = this[stateKey];
     const { checkIn, checkOut, guestName, ratePerNight, discountPercent, emailMessage } = qs;
@@ -763,10 +806,10 @@ Domus 106`;
     this.error = null;
     this.render();
     try {
-      const res = await fetch('/api/generate-quote', {
+      const res = await fetch('/api/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage })
+        body: JSON.stringify({ action: 'send', to, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1141,6 +1184,9 @@ Domus 106`;
           <div class="btn-row">
             <button class="btn btn-secondary" ${this.quoteState.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('quoteState')">${this.quoteState.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
           </div>
+          <div class="btn-row">
+            <button class="btn ${this.quoteState.confirmed ? 'btn-send sent' : 'btn-secondary'}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Aggiungo al calendario…' : (this.quoteState.confirmed ? '✓ In calendario' : '✅ Conferma prenotazione')}</button>
+          </div>
         `}
       </div>`;
 
@@ -1220,6 +1266,9 @@ Domus 106`;
           <div class="btn-row">
             <button class="btn btn-secondary" ${qs.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('standaloneQuoteState')">${qs.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
           </div>
+          <div class="btn-row">
+            <button class="btn ${qs.confirmed ? 'btn-send sent' : 'btn-secondary'}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Aggiungo al calendario…' : (qs.confirmed ? '✓ In calendario' : '✅ Conferma prenotazione')}</button>
+          </div>
         `}
       </div>`;
   }
@@ -1249,6 +1298,20 @@ Domus 106`;
     else if (this.view === 'emails') el.innerHTML = this.renderEmails();
     else if (this.view === 'detail') el.innerHTML = this.renderDetail();
     else if (this.view === 'quoteStandalone') el.innerHTML = this.renderStandaloneQuote();
+    this.updateAppBadge();
+  }
+
+  // Numero rosso sull'icona in home, come l'app Mail — riflette il totale
+  // delle email non ancora gestite in tutte le categorie
+  updateAppBadge() {
+    if (!('setAppBadge' in navigator)) return;
+    try {
+      const total = Object.keys(CATEGORY_META).reduce((sum, cat) => sum + this.unresolvedCount(cat), 0);
+      if (total > 0) navigator.setAppBadge(total).catch(() => {});
+      else if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {});
+    } catch (e) {
+      // badge non supportato su questo dispositivo, nessun problema
+    }
   }
 }
 
