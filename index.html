@@ -980,28 +980,24 @@ Domus 106`;
       ? this.extractEmailAddress(this.selectedEmail.from)
       : (qs.recipientEmail || '').trim();
 
-    const icsContent = this.buildICS({ guestName, checkIn, checkOut, guestEmail, total });
-    const blob = new Blob([icsContent], { type: 'text/calendar' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
     qs.confirming = true;
     this.error = null;
     this.render();
+
+    // 1) Salva PRIMA sul server, mentre la pagina è ancora sicuramente in
+    // primo piano — evita che l'apertura del foglio "Aggiungi a Calendario"
+    // metta in pausa la pagina proprio mentre la richiesta è in volo (causa
+    // del blocco su "Un attimo…"). Un timeout di sicurezza a 12s impedisce
+    // comunque che il bottone resti bloccato all'infinito in caso di rete
+    // lenta o assente.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    let savedBooking = null;
     try {
-      // keepalive: true — la richiesta deve arrivare a destinazione anche se
-      // iOS mette la pagina in background subito dopo aver aperto il foglio
-      // "Aggiungi a Calendario" (altrimenti la fetch può restare sospesa e
-      // sembrare che non sia successo nulla, pur avendo salvato più tardi
-      // — o mai).
       const res = await fetch('/api/booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
+        signal: controller.signal,
         body: JSON.stringify({
           guestName, guestEmail, checkIn, checkOut, total,
           notes: qs.notes || null,
@@ -1011,17 +1007,38 @@ Domus 106`;
           sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
         })
       });
+      clearTimeout(timeoutId);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Salvataggio prenotazione fallito');
-
-      qs.confirmed = true;
-      qs.confirmedCode = (data.booking && data.booking.code) || null;
-      this.showBookingSavedConfirmation(true, qs.confirmedCode);
+      savedBooking = data.booking || null;
     } catch (e) {
-      this.error = e.message;
-      this.showBookingSavedConfirmation(false, null, e.message);
+      clearTimeout(timeoutId);
+      const msg = e.name === 'AbortError'
+        ? 'Il salvataggio sta impiegando troppo tempo. Controlla la connessione e riprova.'
+        : e.message;
+      this.error = msg;
+      qs.confirming = false;
+      this.showBookingSavedConfirmation(false, null, msg);
+      this.render();
+      return;
     }
+
+    // 2) Solo ORA, con il salvataggio già confermato, apriamo il foglio
+    // "Aggiungi a Calendario" — se la pagina va in pausa da qui in poi non
+    // ha più conseguenze, il dato è già al sicuro sul server.
+    const icsContent = this.buildICS({ guestName, checkIn, checkOut, guestEmail, total });
+    const blob = new Blob([icsContent], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    qs.confirmed = true;
+    qs.confirmedCode = (savedBooking && savedBooking.code) || null;
     qs.confirming = false;
+    this.showBookingSavedConfirmation(true, qs.confirmedCode);
     this.render();
   }
 
