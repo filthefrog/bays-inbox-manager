@@ -328,6 +328,8 @@ const CATEGORY_META = {
   'Cancellazione':           { icon: '❌', color: 'gray' }
 };
 
+const VAPID_PUBLIC_KEY = "BAUiDQRLOp24qASDBM3nbZp39PPaZdfaCSC0Fcx9u79ervwtSp7apDxmMo_aV-V-4qVXOH7wB4ck598mmBgJcSU";
+
 class ACME {
   constructor() {
     this.view = 'init';
@@ -340,6 +342,7 @@ class ACME {
     this.sendingIdx = null;
     this.quoteState = this.emptyQuoteState();
     this.standaloneQuoteState = this.emptyQuoteState();
+    this.pushEnabled = false;
   }
 
   emptyQuoteState() {
@@ -378,6 +381,27 @@ class ACME {
     if (debugScope) {
       this.error = 'DEBUG scope ricevuto da Google: ' + decodeURIComponent(debugScope);
       this.render();
+    }
+    setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
+  }
+
+  // Aggiornamento automatico ogni 5 minuti: solo se si è fermi sulla dashboard
+  // (mai mentre si scrive una risposta o un preventivo), e senza mostrare la
+  // schermata di caricamento — sfrutta la stessa cache, quindi non chiama
+  // Claude per le email già viste.
+  async silentRefresh() {
+    if (this.view !== 'dashboard') return;
+    try {
+      const res = await fetch('/api/emails-analyzed', {
+        headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      this.byCategory = data.byCategory || {};
+      this.lastUpdated = new Date();
+      if (this.view === 'dashboard') this.render();
+    } catch (e) {
+      // controllo silenzioso in background, non mostriamo errori di rete transitori
     }
   }
 
@@ -848,6 +872,85 @@ Domus 106`;
     this.loginWithGmail();
   }
 
+  urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+
+  async checkPushStatus() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      this.pushEnabled = !!sub;
+    } catch (e) {
+      // niente di grave, restano semplicemente disattivate
+    }
+  }
+
+  async togglePushNotifications() {
+    if (this.pushEnabled) {
+      await this.disablePush();
+    } else {
+      await this.enablePush();
+    }
+  }
+
+  async enablePush() {
+    this.error = null;
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        this.error = 'Le notifiche push non sono supportate su questo browser/dispositivo';
+        this.render();
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        this.error = 'Permesso notifiche negato dal telefono';
+        this.render();
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: this.urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+      await fetch('/api/save-push-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub)
+      });
+      this.pushEnabled = true;
+    } catch (e) {
+      this.error = 'Attivazione notifiche fallita: ' + e.message;
+    }
+    this.render();
+  }
+
+  async disablePush() {
+    this.error = null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await fetch('/api/delete-push-subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint })
+        });
+        await sub.unsubscribe();
+      }
+      this.pushEnabled = false;
+    } catch (e) {
+      this.error = 'Disattivazione fallita: ' + e.message;
+    }
+    this.render();
+  }
+
   resetKey() {
     localStorage.removeItem('claude_api_key');
     this.view = 'setup';
@@ -936,7 +1039,7 @@ Domus 106`;
         <div class="status">${updatedText}</div>
         <button class="icon-btn" onclick="app.loadEmails()">↻</button>
       </div>
-      <div class="settings-link"><a onclick="app.resetKey()">Cambia chiave API</a> &nbsp;·&nbsp; <a onclick="app.reconnectGmail()">Riconnetti Gmail</a></div>`;
+      <div class="settings-link"><a onclick="app.resetKey()">Cambia chiave API</a> &nbsp;·&nbsp; <a onclick="app.reconnectGmail()">Riconnetti Gmail</a> &nbsp;·&nbsp; <a onclick="app.togglePushNotifications()">${this.pushEnabled ? '🔕 Disattiva notifiche' : '🔔 Attiva notifiche'}</a></div>`;
   }
 
   renderEmails() {
@@ -1154,7 +1257,10 @@ app.init();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js')
+      .then(() => app.checkPushStatus())
+      .then(() => app.render())
+      .catch(() => {});
   });
 }
 </script>
