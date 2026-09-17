@@ -1,7 +1,21 @@
 // Endpoint per l'archivio interno delle prenotazioni confermate.
-// GET  -> elenco prenotazioni (per la sezione "Prenotazioni confermate")
-// POST -> salva una nuova prenotazione confermata
+// GET    -> elenco prenotazioni (o una singola, passando ?code=XXX)
+// POST   -> salva una nuova prenotazione confermata (genera un codice univoco)
+// PATCH  -> aggiorna stato/note di una prenotazione esistente
 // DELETE -> rimuove una prenotazione (es. se poi viene cancellata)
+
+function generateBookingCode(checkInStr) {
+  // Formato: D106-MMDD-XXXX — leggibile, comunicabile a voce, nessun contatore
+  // condiviso da sincronizzare (evita collisioni tra richieste simultanee).
+  const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // esclude 0/O/1/I: ambigui a voce
+  let suffix = '';
+  for (let i = 0; i < 4; i++) suffix += CHARS[Math.floor(Math.random() * CHARS.length)];
+  const d = new Date((checkInStr || new Date().toISOString().slice(0, 10)) + 'T00:00:00');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `D106-${mm}${dd}-${suffix}`;
+}
+
 export default async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -11,7 +25,11 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?select=*&order=check_in.asc`, {
+      const { code } = req.query || {};
+      const path = code
+        ? `confirmed_bookings?select=*&code=eq.${encodeURIComponent(code)}`
+        : `confirmed_bookings?select=*&order=check_in.asc`;
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
       });
       const rows = resp.ok ? await resp.json() : [];
@@ -22,33 +40,83 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { guestName, guestEmail, checkIn, checkOut, total } = req.body;
+    const {
+      guestName, guestEmail, checkIn, checkOut, total,
+      sourceFrom, sourceSubject, sourceBody, notes
+    } = req.body;
     if (!guestName || !checkIn || !checkOut) {
       return res.status(400).json({ error: 'Nome ospite, check-in e check-out sono obbligatori' });
     }
+
+    // Prova a inserire con un codice generato; in caso di rarissima collisione
+    // (violazione del vincolo unique) rigenera e riprova, fino a 3 volte.
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const code = generateBookingCode(checkIn);
+      try {
+        const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            Prefer: 'return=representation'
+          },
+          body: JSON.stringify({
+            code,
+            guest_name: guestName,
+            guest_email: guestEmail || null,
+            check_in: checkIn,
+            check_out: checkOut,
+            total: total || null,
+            status: 'confermata',
+            notes: notes || null,
+            source_from: sourceFrom || null,
+            source_subject: sourceSubject || null,
+            source_body: sourceBody || null
+          })
+        });
+        if (resp.ok) {
+          const created = await resp.json();
+          return res.status(200).json({ success: true, booking: created[0] });
+        }
+        const detail = await resp.text();
+        if (detail.includes('duplicate key') || detail.toLowerCase().includes('code')) {
+          lastError = detail;
+          continue; // collisione sul codice: rigenera e riprova
+        }
+        return res.status(500).json({ error: 'Errore Supabase: ' + detail.slice(0, 200) });
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+    return res.status(500).json({ error: 'Impossibile generare un codice univoco: ' + (lastError || '').slice(0, 150) });
+  }
+
+  if (req.method === 'PATCH') {
+    const { id, notes, status } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id mancante' });
+    const patch = {};
+    if (notes !== undefined) patch.notes = notes;
+    if (status !== undefined) patch.status = status;
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
     try {
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings`, {
-        method: 'POST',
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${SUPABASE_KEY}`,
           Prefer: 'return=representation'
         },
-        body: JSON.stringify({
-          guest_name: guestName,
-          guest_email: guestEmail || null,
-          check_in: checkIn,
-          check_out: checkOut,
-          total: total || null
-        })
+        body: JSON.stringify(patch)
       });
       if (!resp.ok) {
         const detail = await resp.text();
         return res.status(500).json({ error: 'Errore Supabase: ' + detail.slice(0, 200) });
       }
-      const created = await resp.json();
-      return res.status(200).json({ success: true, booking: created[0] });
+      const updated = await resp.json();
+      return res.status(200).json({ success: true, booking: updated[0] });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
