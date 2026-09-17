@@ -113,13 +113,14 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { id, notes, status, checkoutReviewed, paymentStatus } = req.body || {};
+    const { id, notes, status, checkoutReviewed, paymentStatus, concludedAt } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id mancante' });
     const patch = {};
     if (notes !== undefined) patch.notes = notes;
     if (status !== undefined) patch.status = status;
     if (checkoutReviewed !== undefined) patch.checkout_reviewed = checkoutReviewed;
     if (paymentStatus !== undefined) patch.payment_status = paymentStatus;
+    if (concludedAt !== undefined) patch.concluded_at = concludedAt;
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
     try {
       const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
