@@ -919,10 +919,10 @@ Domus 106`;
         userVisibleOnly: true,
         applicationServerKey: this.urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
       });
-      await fetch('/api/save-push-subscription', {
+      await fetch('/api/push-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sub)
+        body: JSON.stringify({ action: 'save', subscription: sub })
       });
       this.pushEnabled = true;
     } catch (e) {
@@ -937,10 +937,10 @@ Domus 106`;
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
-        await fetch('/api/delete-push-subscription', {
+        await fetch('/api/push-subscription', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: sub.endpoint })
+          body: JSON.stringify({ action: 'delete', endpoint: sub.endpoint })
         });
         await sub.unsubscribe();
       }
