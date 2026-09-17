@@ -312,6 +312,10 @@
   .confirm-box .icon { font-size: 42px; margin-bottom: 12px; }
   .confirm-box h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
   .confirm-box p { font-size: 14px; color: var(--text-secondary); margin-bottom: 22px; line-height: 1.45; }
+  .review-tab {
+    background: rgba(10,110,189,0.08); color: var(--accent); font-size: 13px; font-weight: 700;
+    padding: 8px 14px; border-radius: 100px; display: inline-block; margin-bottom: 14px;
+  }
   .btn-row { display: flex; gap: 8px; }
   .btn-row + .btn-row { margin-top: 8px; }
   .btn {
@@ -523,10 +527,15 @@ class ACME {
     this.error = null;
     this.render();
     try {
+      const wasActive = (b.status || 'confermata') !== 'conclusa' && (b.status || 'confermata') !== 'cancellata';
+      const nowConcluded = this.bookingStatusDraft === 'conclusa' || this.bookingStatusDraft === 'cancellata';
+      const concludedAt = (wasActive && nowConcluded) ? new Date().toISOString() : undefined;
+      const payload = { id: b.id, notes: this.bookingNotesDraft, status: this.bookingStatusDraft, paymentStatus: this.bookingPaymentDraft };
+      if (concludedAt) payload.concludedAt = concludedAt;
       const res = await fetch('/api/booking', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: b.id, notes: this.bookingNotesDraft, status: this.bookingStatusDraft, paymentStatus: this.bookingPaymentDraft })
+        body: JSON.stringify(payload)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Salvataggio fallito');
@@ -549,11 +558,11 @@ class ACME {
   }
 
   dismissBooking(id) {
-    const booking = this.bookings.find(b => b.id === id);
+    const booking = this.bookings.find(b => b.id === id) || this.selectedBooking;
     const name = booking ? booking.guest_name : 'questa prenotazione';
     this.showConfirmDialog({
       title: 'Eliminare la prenotazione?',
-      desc: `${name} verrà rimossa definitivamente dall'archivio${booking && booking.code ? ' (codice ' + booking.code + ')' : ''}. Non è recuperabile.`,
+      desc: `${this.escape(name)} verrà rimossa definitivamente dall'archivio${booking && booking.code ? ' (codice ' + booking.code + ')' : ''}. Non è recuperabile.`,
       confirmLabel: 'Elimina',
       onConfirm: async () => {
         try {
@@ -564,7 +573,51 @@ class ACME {
           });
         } catch (e) {}
         this.bookings = this.bookings.filter(b => b.id !== id);
+        if (this.view === 'bookingDetail' && this.selectedBooking && this.selectedBooking.id === id) {
+          this.view = this.bookingDetailOrigin || 'bookingsList';
+          this.selectedBooking = null;
+        }
         this.render();
+      }
+    });
+  }
+
+  // Una prenotazione conclusa da più di 48 ore non può più tornare "in corso":
+  // diventa solo consultabile, per sicurezza (evita di riaprire per sbaglio
+  // soggiorni ormai chiusi da tempo). Le prenotazioni senza concluded_at
+  // (salvate prima di questo aggiornamento) non vengono bloccate a ritroso.
+  isBookingLocked(b) {
+    if (!b.concluded_at) return false;
+    const elapsedMs = Date.now() - new Date(b.concluded_at).getTime();
+    return elapsedMs > 48 * 60 * 60 * 1000;
+  }
+
+  restoreBookingToActive(id) {
+    const booking = this.bookings.find(b => b.id === id);
+    if (!booking) return;
+    if (this.isBookingLocked(booking)) {
+      this.error = 'Sono passate più di 48 ore dalla chiusura: questa prenotazione è ormai solo consultabile.';
+      this.render();
+      return;
+    }
+    this.showConfirmDialog({
+      title: 'Riportarla tra le prenotazioni in corso?',
+      desc: `${this.escape(booking.guest_name)} tornerà tra le prenotazioni attive.`,
+      confirmLabel: 'Riporta in corso',
+      confirmColor: 'var(--accent)',
+      icon: '↩️',
+      onConfirm: async () => {
+        try {
+          await fetch('/api/booking', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, status: 'confermata', checkoutReviewed: false, concludedAt: null })
+          });
+        } catch (e) {}
+        const idx = this.bookings.findIndex(x => x.id === id);
+        if (idx !== -1) { this.bookings[idx].status = 'confermata'; this.bookings[idx].checkout_reviewed = false; this.bookings[idx].concluded_at = null; }
+        const area = document.getElementById('bookingResultsArea');
+        if (area) area.innerHTML = this.renderBookingRows(); else this.render();
       }
     });
   }
@@ -724,17 +777,17 @@ class ACME {
 
   // Dialog di conferma generico usato prima di ogni cancellazione (✕): mostra
   // Annulla + un bottone d'azione rosso, ed esegue onConfirm solo se confermato.
-  showConfirmDialog({ title, desc, confirmLabel = 'Elimina', onConfirm }) {
+  showConfirmDialog({ title, desc, confirmLabel = 'Elimina', confirmColor = 'var(--red)', icon = '🗑️', onConfirm }) {
     this._pendingConfirmAction = onConfirm;
     const overlay = document.getElementById('confirmOverlay');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">🗑️</div>
+        <div class="icon">${icon}</div>
         <h3>${title}</h3>
         <p>${desc}</p>
         <div class="btn-row">
           <button class="btn btn-secondary" onclick="app.cancelConfirmDialog()">Annulla</button>
-          <button class="btn" style="background:var(--red); color:white;" onclick="app.runConfirmedAction()">${confirmLabel}</button>
+          <button class="btn" style="background:${confirmColor}; color:white;" onclick="app.runConfirmedAction()">${confirmLabel}</button>
         </div>
       </div>`;
     overlay.classList.remove('hidden');
@@ -911,13 +964,14 @@ class ACME {
     try {
       const existingNotes = booking.notes ? booking.notes + '\n' : '';
       const combinedNotes = note ? existingNotes + note : (booking.notes || null);
+      const concludedAt = new Date().toISOString();
       await fetch('/api/booking', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: booking.id, status: 'conclusa', checkoutReviewed: reviewed, notes: combinedNotes })
+        body: JSON.stringify({ id: booking.id, status: 'conclusa', checkoutReviewed: reviewed, notes: combinedNotes, concludedAt })
       });
       const idx = this.bookings.findIndex(x => x.id === booking.id);
-      if (idx !== -1) { this.bookings[idx].status = 'conclusa'; this.bookings[idx].notes = combinedNotes; }
+      if (idx !== -1) { this.bookings[idx].status = 'conclusa'; this.bookings[idx].notes = combinedNotes; this.bookings[idx].concluded_at = concludedAt; }
     } catch (e) {}
   }
 
@@ -1870,9 +1924,14 @@ Domus 106`;
       const paymentClass = 'chip-pay-' + payment.replace(/\s+/g, '-');
       const paymentLabel = payment === 'da saldare' ? 'Da saldare' : (payment === 'acconto versato' ? 'Acconto' : 'Saldata');
       const showQuickConclude = !isHistory && status !== 'conclusa' && status !== 'cancellata';
+      const locked = isHistory && this.isBookingLocked(b);
       return `
         <div class="booking-row ${showQuickConclude ? 'has-quick-action' : ''}" onclick='app.openBookingDetail(${safeBooking})'>
-          <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissBooking(${b.id})'>✕</button>
+          ${isHistory
+            ? (locked
+                ? `<button class="dismiss-btn" title="Bloccata: consultabile ma non modificabile" disabled style="opacity:0.4; cursor:default;">🔒</button>`
+                : `<button class="dismiss-btn" title="Riporta tra le prenotazioni in corso" onclick='event.stopPropagation(); app.restoreBookingToActive(${b.id})'>↩</button>`)
+            : ''}
           ${showQuickConclude ? `<button class="flag-btn" title="Segna come conclusa" onclick='event.stopPropagation(); app.quickConcludeBooking(${b.id})'>✓</button>` : ''}
           <div class="row-top">
             <div class="name">${this.escape(b.guest_name)}</div>
@@ -1893,24 +1952,75 @@ Domus 106`;
   quickConcludeBooking(id) {
     const booking = this.bookings.find(b => b.id === id);
     if (!booking) return;
-    this.showConfirmDialog({
-      title: 'Segnare come conclusa?',
-      desc: `${this.escape(booking.guest_name)} passerà nello storico prenotazioni.`,
-      confirmLabel: 'Conclusa',
-      onConfirm: async () => {
-        try {
-          await fetch('/api/booking', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, status: 'conclusa', checkoutReviewed: true })
-          });
-        } catch (e) {}
-        const idx = this.bookings.findIndex(x => x.id === id);
-        if (idx !== -1) { this.bookings[idx].status = 'conclusa'; this.bookings[idx].checkout_reviewed = true; }
-        const area = document.getElementById('bookingResultsArea');
-        if (area) area.innerHTML = this.renderBookingRows(); else this.render();
-      }
-    });
+    this.pendingConcludeBooking = booking;
+    this.checkoutNoteDraft = '';
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">🏁</div>
+        <h3>Sei sicuro di voler chiudere questa prenotazione?</h3>
+        <p>${this.escape(booking.guest_name)} passerà nello storico.</p>
+        <div class="review-tab">Il soggiorno è andato bene?</div>
+        <div class="btn-row">
+          <button class="btn btn-send" onclick="app.quickConcludeGood()">Sì</button>
+          <button class="btn" style="background:var(--orange); color:white;" onclick="app.quickConcludeBad()">No</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="app.cancelConfirmDialog()">Annulla</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  async quickConcludeGood() {
+    const booking = this.pendingConcludeBooking;
+    this.closeConfirmModal();
+    await this.finalizeBookingConclusion(booking, null);
+  }
+
+  quickConcludeBad() {
+    const booking = this.pendingConcludeBooking;
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">⚠️</div>
+        <h3>Cosa è successo?</h3>
+        <p>Questa nota resta legata a ${this.escape(booking.guest_name)} — utile se dovesse riprenotare in futuro.</p>
+        <textarea class="form-input" style="min-height:90px; resize:vertical; text-align:left;" placeholder="Es. rumoroso, lamentele dai vicini, danni…" oninput="app.checkoutNoteDraft = this.value"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="app.cancelConfirmDialog()">Annulla</button>
+          <button class="btn btn-send" onclick="app.quickConcludeBadSave()">Salva e concludi</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  async quickConcludeBadSave() {
+    const booking = this.pendingConcludeBooking;
+    this.closeConfirmModal();
+    await this.finalizeBookingConclusion(booking, this.checkoutNoteDraft || null);
+  }
+
+  async finalizeBookingConclusion(booking, note) {
+    const combinedNotes = note ? (booking.notes ? booking.notes + '\n' + note : note) : (booking.notes || null);
+    const concludedAt = new Date().toISOString();
+    try {
+      await fetch('/api/booking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: booking.id, status: 'conclusa', checkoutReviewed: true, notes: combinedNotes, concludedAt })
+      });
+    } catch (e) {}
+    const idx = this.bookings.findIndex(x => x.id === booking.id);
+    if (idx !== -1) {
+      this.bookings[idx].status = 'conclusa';
+      this.bookings[idx].checkout_reviewed = true;
+      this.bookings[idx].notes = combinedNotes;
+      this.bookings[idx].concluded_at = concludedAt;
+    }
+    this.pendingConcludeBooking = null;
+    const area = document.getElementById('bookingResultsArea');
+    if (area) area.innerHTML = this.renderBookingRows(); else this.render();
   }
 
   renderBookingsList() {
@@ -1939,6 +2049,7 @@ Domus 106`;
     const checkInFmt = this.formatQuoteDate(b.check_in);
     const checkOutFmt = this.formatQuoteDate(b.check_out);
     const hasSource = b.source_subject || b.source_from || b.source_body;
+    const locked = this.isBookingLocked(b);
     const statusOptions = BOOKING_STATUSES.map(s =>
       `<option value="${s}" ${this.bookingStatusDraft === s ? 'selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1)}</option>`
     ).join('');
@@ -1981,14 +2092,25 @@ Domus 106`;
       </div>` : ''}
       <div class="section-title">Stato, pagamento e note</div>
       <div class="detail-card">
-        <span class="form-label">Stato soggiorno</span>
-        <select class="form-input" onchange="app.bookingStatusDraft = this.value">${statusOptions}</select>
-        <span class="form-label">Stato pagamento</span>
-        <select class="form-input" onchange="app.bookingPaymentDraft = this.value">${paymentOptions}</select>
-        <span class="form-label">Note</span>
-        <textarea class="form-input" style="min-height:90px; resize:vertical;" placeholder="Es. arriva in ritardo, ha chiesto una culla…" oninput="app.bookingNotesDraft = this.value">${this.escape(this.bookingNotesDraft)}</textarea>
-        <button class="btn btn-primary" ${this.bookingSaving ? 'disabled' : ''} onclick="app.saveBookingDetail()">${this.bookingSaving ? 'Salvataggio…' : 'Salva modifiche'}</button>
-      </div>`;
+        ${locked ? `
+          <div class="discrepancy-banner">🔒 Conclusa da più di 48 ore: ora è solo consultabile, non più modificabile né ripristinabile tra le prenotazioni in corso.</div>
+          <div class="detail-row"><span class="label">Stato soggiorno</span>${this.escape(b.status || 'confermata')}</div>
+          <div class="detail-row"><span class="label">Stato pagamento</span>${this.escape(b.payment_status || 'da saldare')}</div>
+          ${b.notes ? `<div class="detail-row"><span class="label">Note</span></div><div class="original-text">${this.escape(b.notes)}</div>` : ''}
+        ` : `
+          <span class="form-label">Stato soggiorno</span>
+          <select class="form-input" onchange="app.bookingStatusDraft = this.value">${statusOptions}</select>
+          <span class="form-label">Stato pagamento</span>
+          <select class="form-input" onchange="app.bookingPaymentDraft = this.value">${paymentOptions}</select>
+          <span class="form-label">Note</span>
+          <textarea class="form-input" style="min-height:90px; resize:vertical;" placeholder="Es. arriva in ritardo, ha chiesto una culla…" oninput="app.bookingNotesDraft = this.value">${this.escape(this.bookingNotesDraft)}</textarea>
+          <button class="btn btn-primary" ${this.bookingSaving ? 'disabled' : ''} onclick="app.saveBookingDetail()">${this.bookingSaving ? 'Salvataggio…' : 'Salva modifiche'}</button>
+        `}
+      </div>
+      ${this.bookingDetailOrigin === 'bookingHistory' ? `
+      <div class="detail-card">
+        <button class="btn" style="background:rgba(255,59,48,0.1); color:var(--red);" onclick="app.dismissBooking(${b.id})">🗑️ Elimina prenotazione</button>
+      </div>` : ''}`;
   }
 
   formatDate(dateStr, full) {
