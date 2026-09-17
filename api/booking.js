@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const {
       guestName, guestEmail, checkIn, checkOut, total,
-      sourceFrom, sourceSubject, sourceBody, notes
+      sourceFrom, sourceSubject, sourceBody, notes, guests
     } = req.body;
     if (!guestName || !checkIn || !checkOut) {
       return res.status(400).json({ error: 'Nome ospite, check-in e check-out sono obbligatori' });
@@ -71,6 +71,7 @@ export default async function handler(req, res) {
             total: total || null,
             status: 'confermata',
             notes: notes || null,
+            guests: guests || null,
             source_from: sourceFrom || null,
             source_subject: sourceSubject || null,
             source_body: sourceBody || null
