@@ -447,6 +447,7 @@ class ACME {
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
       notes: '', guests: 1, guestHistory: [], paymentStatus: 'da saldare',
+      prefilledFromQuote: false, quoteSentAt: null,
       confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
     };
@@ -838,7 +839,34 @@ class ACME {
     this.view = 'detail';
     this.render();
     const guestEmail = this.extractEmailAddress(email.from);
-    if (guestEmail) this.checkGuestHistory('emailBookingState', guestEmail);
+    if (guestEmail) {
+      this.checkGuestHistory('emailBookingState', guestEmail);
+      this.checkPendingQuote(guestEmail);
+    }
+  }
+
+  // Se per questo cliente c'è un preventivo già inviato in precedenza,
+  // precompila la sezione Prenotazione con tariffa/sconto/date/ospiti già
+  // decisi — evita di doverli ridigitare quando il cliente risponde per confermare.
+  async checkPendingQuote(email) {
+    try {
+      const res = await fetch('/api/booking?pendingQuoteEmail=' + encodeURIComponent(email));
+      const data = await res.json().catch(() => ({}));
+      const pq = data.pendingQuote;
+      if (!pq) return;
+      // Solo se siamo ancora sulla stessa mail/cliente (evita race condition
+      // se l'utente ha già cambiato schermata quando la risposta arriva)
+      if (!this.selectedEmail || this.extractEmailAddress(this.selectedEmail.from) !== email) return;
+      const bs = this.emailBookingState;
+      if (pq.check_in) bs.checkIn = pq.check_in;
+      if (pq.check_out) bs.checkOut = pq.check_out;
+      if (pq.rate_per_night != null) { bs.ratePerNight = String(pq.rate_per_night); bs.rateTouched = true; }
+      if (pq.discount_percent != null) { bs.discountPercent = String(pq.discount_percent); bs.discountTouched = true; }
+      if (pq.guests) bs.guests = pq.guests;
+      bs.prefilledFromQuote = true;
+      bs.quoteSentAt = pq.created_at;
+      this.render();
+    } catch (e) {}
   }
 
   async sendResponse(idx) {
@@ -992,7 +1020,16 @@ class ACME {
     try {
       const res = await fetch('/api/booking?guestEmail=' + encodeURIComponent(email));
       const data = await res.json().catch(() => ({}));
-      this[stateKey].guestHistory = (data.bookings || []).filter(b => b.notes);
+      const withNotes = (data.bookings || []).filter(b => b.notes);
+      // Deduplica per data+testo: se ci sono più prenotazioni con la stessa
+      // identica nota (es. da un doppio tap durante un test), mostrala una volta sola.
+      const seen = new Set();
+      this[stateKey].guestHistory = withNotes.filter(b => {
+        const key = (b.check_out || '') + '|' + b.notes;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     } catch (e) {
       this[stateKey].guestHistory = [];
     }
@@ -1453,6 +1490,13 @@ Domus 106`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emailId: this.selectedEmail.id })
       }).catch(() => {});
+      if (guestEmail) {
+        fetch('/api/booking', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deletePendingQuoteEmail: guestEmail })
+        }).catch(() => {});
+      }
     }
     this.render();
   }
@@ -1506,6 +1550,21 @@ Domus 106`;
       qs.sending = false;
       qs.sent = true;
       this.showQuoteConfirmation(data.confirmed, data.total);
+      // Salva il preventivo come "in sospeso" per questo cliente, così quando
+      // risponde per confermare non serve ridigitare tariffa/sconto/date.
+      fetch('/api/booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          savePendingQuote: true,
+          guestEmail: to, guestName, checkIn, checkOut,
+          ratePerNight: parseFloat(ratePerNight) || null,
+          discountPercent: parseFloat(discountPercent) || null,
+          guests: qs.guests || null,
+          total: data.total,
+          sourceSubject: this.selectedEmail ? this.selectedEmail.subject : null
+        })
+      }).catch(() => {});
     } catch (e) {
       qs.sending = false;
       this.error = e.message;
@@ -1863,6 +1922,7 @@ Domus 106`;
     const bookingSection = `
       <div class="section-title">Prenotazione</div>
       <div class="detail-card">
+        ${bs.prefilledFromQuote ? `<div class="discrepancy-banner" style="background:rgba(10,110,189,0.1); color:var(--accent);">📄 <b>Dati precompilati</b> dal preventivo inviato il ${bs.quoteSentAt ? this.formatQuoteDate(bs.quoteSentAt.slice(0, 10)) : 'in precedenza'} — controlla prima di confermare.</div>` : ''}
         ${this.renderGuestHistoryBanner(bs.guestHistory)}
         <span class="form-label">Nome ospite</span>
         <input type="text" class="form-input" value="${this.escape(bs.guestName)}" oninput="app.updateQuoteField('emailBookingState','guestName', this.value)">
