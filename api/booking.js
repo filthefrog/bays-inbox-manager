@@ -75,6 +75,21 @@ export default async function handler(req, res) {
     }
   }
 
+  // Prossima prenotazione dopo una certa data — usata per avvisare la colf
+  // di quanto tempo ha per le pulizie dopo un check-out.
+  if (req.method === 'GET' && req.query.nextCheckinAfter) {
+    try {
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=guest_name,check_in,check_out&check_in=gte.${encodeURIComponent(req.query.nextCheckinAfter)}&status=neq.cancellata&status=neq.conclusa&order=check_in.asc&limit=1`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      const rows = resp.ok ? await resp.json() : [];
+      return res.status(200).json({ nextBooking: rows[0] || null });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   if (req.method === 'GET') {
     try {
       const { code, needsReview, guestEmail } = req.query || {};
