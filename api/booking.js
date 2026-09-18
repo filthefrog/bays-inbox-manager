@@ -23,6 +23,41 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Supabase non configurato' });
   }
 
+  // Genera l'evento .ics per il Calendario del telefono, come vera risposta
+  // HTTP (Content-Type: text/calendar) — assorbito qui da booking-ics.js per
+  // restare sotto il limite di funzioni serverless del piano Hobby.
+  if (req.method === 'GET' && req.query.ics === '1') {
+    const { guestName, checkIn, checkOut, guestEmail, total, guests, paymentStatus, notes, code } = req.query;
+    if (!guestName || !checkIn || !checkOut) {
+      return res.status(400).send('Dati mancanti per generare l\'evento (nome ospite, check-in e check-out sono obbligatori)');
+    }
+    const fmtDate = (d) => (d || '').replace(/-/g, '');
+    const uid = `acme-${checkIn}-${guestName.replace(/\s+/g, '')}-${Date.now()}@domus106`;
+    const dtstamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const paymentLabel = paymentStatus === 'saldata' ? 'Saldata'
+      : paymentStatus === 'acconto versato' ? 'Acconto versato' : 'DA SALDARE';
+    const paymentBadge = paymentStatus === 'saldata' ? '✅' : (paymentStatus === 'acconto versato' ? '💶' : '⚠️');
+    const descParts = [];
+    descParts.push('Pagamento: ' + paymentLabel);
+    if (guests) descParts.push('Ospiti: ' + guests);
+    if (guestEmail) descParts.push('Email ospite: ' + guestEmail);
+    if (total) descParts.push('Totale: € ' + Number(total).toFixed(2));
+    if (code) descParts.push('Codice: ' + code);
+    if (notes) descParts.push('Note: ' + notes);
+    descParts.push('Creato da ACME Inbox Manager');
+    const lines = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Domus 106//ACME//IT', 'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${dtstamp}`,
+      `DTSTART;VALUE=DATE:${fmtDate(checkIn)}`, `DTEND;VALUE=DATE:${fmtDate(checkOut)}`,
+      `SUMMARY:${paymentBadge} ${guestName} — Domus 106 (${paymentLabel})`,
+      `DESCRIPTION:${descParts.join('\\n')}`,
+      'END:VEVENT', 'END:VCALENDAR'
+    ];
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="prenotazione.ics"');
+    return res.status(200).send(lines.join('\r\n'));
+  }
+
   if (req.method === 'GET') {
     try {
       const { code, needsReview, guestEmail } = req.query || {};
