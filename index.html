@@ -668,7 +668,10 @@ class ACME {
       this.selectedBooking = data.booking;
       const idx = this.bookings.findIndex(x => x.id === b.id);
       if (idx !== -1) this.bookings[idx] = data.booking;
-      if (wasActive && this.bookingStatusDraft === 'conclusa') this.notifyCleaningLady(data.booking);
+      if (wasActive && this.bookingStatusDraft === 'conclusa') {
+        this.notifyCleaningLady(data.booking);
+        this.showNextBookingInfo(data.booking);
+      }
     } catch (e) {
       this.error = e.message;
     }
@@ -1089,7 +1092,7 @@ class ACME {
   async reviewCheckoutOk() {
     const b = this.currentCheckoutReview;
     await this.saveCheckoutReview(b, true, null);
-    this.advanceCheckoutQueue();
+    this.showNextBookingInfo(b, () => this.advanceCheckoutQueue());
   }
 
   reviewCheckoutProblem() {
@@ -1112,7 +1115,7 @@ class ACME {
   async saveCheckoutProblemNote() {
     const b = this.currentCheckoutReview;
     await this.saveCheckoutReview(b, true, this.checkoutNoteDraft || null);
-    this.advanceCheckoutQueue();
+    this.showNextBookingInfo(b, () => this.advanceCheckoutQueue());
   }
 
   skipCheckoutReview() {
@@ -1139,6 +1142,26 @@ class ACME {
     } catch (e) {}
   }
 
+  // Orari fissi di check-out/check-in — modificabili qui se la regola cambia.
+  // Check-out entro le 11:00; check-in del prossimo ospite non prima delle
+  // 12:00 (un giorno libero per le pulizie, come da regola di Filippo).
+  get checkoutHour() { return 11; }
+  get checkinHour() { return 12; }
+
+  hoursUntilNextCheckin(checkOutDate, nextCheckInDate) {
+    const checkoutMoment = new Date(`${checkOutDate}T${String(this.checkoutHour).padStart(2, '0')}:00:00`);
+    const nextCheckinMoment = new Date(`${nextCheckInDate}T${String(this.checkinHour).padStart(2, '0')}:00:00`);
+    return Math.round((nextCheckinMoment - checkoutMoment) / 3600000);
+  }
+
+  formatHoursCountdown(hours) {
+    if (hours <= 0) return 'check-in già iniziato o imminente';
+    if (hours < 48) return `mancano ${hours} or${hours === 1 ? 'a' : 'e'}`;
+    const days = Math.floor(hours / 24);
+    const remHours = hours % 24;
+    return `mancano ${days} giorn${days === 1 ? 'o' : 'i'}${remHours > 0 ? ` e ${remHours} or${remHours === 1 ? 'a' : 'e'}` : ''}`;
+  }
+
   // Avvisa la persona delle pulizie che un soggiorno è terminato, incrociando
   // il calendario per dirle quanto tempo ha prima della prossima prenotazione
   // (nota: le prenotazioni non sono legate a una camera specifica, quindi se
@@ -1161,11 +1184,12 @@ class ACME {
         body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). Puoi andare a fare le pulizie quando preferisci — al momento non risultano altre prenotazioni in arrivo.`;
       } else {
         const nextCheckInFmt = this.formatQuoteDate(next.check_in);
-        const gapDays = Math.round((new Date(next.check_in + 'T00:00:00') - new Date(booking.check_out + 'T00:00:00')) / 86400000);
-        if (gapDays <= 0) {
-          body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). ⚠️ Attenzione: il prossimo ospite (${next.guest_name}) arriva lo STESSO GIORNO — servirebbero le pulizie il prima possibile.`;
+        const hoursLeft = this.hoursUntilNextCheckin(booking.check_out, next.check_in);
+        const countdown = this.formatHoursCountdown(hoursLeft);
+        if (hoursLeft <= 24) {
+          body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). ⚠️ Attenzione: il prossimo ospite (${next.guest_name}) arriva il ${nextCheckInFmt} — ${countdown}, servirebbero le pulizie il prima possibile.`;
         } else {
-          body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). Puoi andare a fare le pulizie con calma: la prossima prenotazione (${next.guest_name}) arriva il ${nextCheckInFmt}, hai ${gapDays} giorn${gapDays === 1 ? 'o' : 'i'} di tempo.`;
+          body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). Puoi andare a fare le pulizie con calma: la prossima prenotazione (${next.guest_name}) arriva il ${nextCheckInFmt} — ${countdown}.`;
         }
       }
 
@@ -1184,6 +1208,47 @@ class ACME {
     this.currentCheckoutReview = null;
     this.closeConfirmModal();
     setTimeout(() => this.showNextCheckoutReview(), 400);
+  }
+
+  // Dopo aver chiuso un soggiorno, mostra a Filippo (non alla colf) la
+  // prossima prenotazione con un countdown in giorni. Niente orario: il
+  // check-in di Domus 106 è autonomo e senza fascia oraria fissa, quindi
+  // quel dato semplicemente non esiste da nessuna parte nei dati salvati.
+  async showNextBookingInfo(booking, onDismiss) {
+    this._nextInfoDismiss = onDismiss || null;
+    let next = null;
+    try {
+      const nextRes = await fetch('/api/booking?nextCheckinAfter=' + encodeURIComponent(booking.check_out));
+      const nextData = await nextRes.json().catch(() => ({}));
+      next = nextData.nextBooking;
+    } catch (e) {}
+
+    let desc;
+    if (!next) {
+      desc = 'Nessuna prenotazione in arrivo al momento.';
+    } else {
+      const nextCheckInFmt = this.formatQuoteDate(next.check_in);
+      const hoursLeft = this.hoursUntilNextCheckin(booking.check_out, next.check_in);
+      const countdown = this.formatHoursCountdown(hoursLeft);
+      desc = `${next.guest_name} — check-in il ${nextCheckInFmt}. ${countdown} al prossimo check-in (check-out entro le ${this.checkoutHour}:00, check-in non prima delle ${this.checkinHour}:00).`;
+    }
+
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box">
+        <div class="icon">📅</div>
+        <h3>Prossima prenotazione</h3>
+        <p>${this.escape(desc)}</p>
+        <button class="btn btn-primary" onclick="app.dismissNextBookingInfo()">OK</button>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  dismissNextBookingInfo() {
+    document.getElementById('confirmOverlay').classList.add('hidden');
+    const cb = this._nextInfoDismiss;
+    this._nextInfoDismiss = null;
+    if (cb) cb();
   }
 
   updateQuoteField(stateKey, field, value) {
@@ -2294,6 +2359,7 @@ Domus 106`;
     const area = document.getElementById('bookingResultsArea');
     if (area) area.innerHTML = this.renderBookingRows(); else this.render();
     this.notifyCleaningLady(booking);
+    this.showNextBookingInfo(booking);
   }
 
   renderBookingsList() {
