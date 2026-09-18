@@ -58,6 +58,23 @@ export default async function handler(req, res) {
     return res.status(200).send(lines.join('\r\n'));
   }
 
+  // Preventivo "in sospeso" collegato a un'email ospite — salvato quando si
+  // invia un preventivo, letto quando si riapre una mail successiva dello
+  // stesso cliente, per precompilare la sezione Prenotazione senza dover
+  // ridigitare tariffa/sconto/date già decisi in precedenza.
+  if (req.method === 'GET' && req.query.pendingQuoteEmail) {
+    try {
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/pending_quotes?select=*&guest_email=eq.${encodeURIComponent(req.query.pendingQuoteEmail)}&limit=1`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      const rows = resp.ok ? await resp.json() : [];
+      return res.status(200).json({ pendingQuote: rows[0] || null });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   if (req.method === 'GET') {
     try {
       const { code, needsReview, guestEmail } = req.query || {};
@@ -83,6 +100,45 @@ export default async function handler(req, res) {
       });
       const rows = resp.ok ? await resp.json() : [];
       return res.status(200).json({ bookings: rows });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Salva (o aggiorna) il preventivo "in sospeso" per questo cliente — una
+  // riga sola per guest_email, sovrascritta ogni volta che si invia un nuovo
+  // preventivo.
+  if (req.method === 'POST' && req.body && req.body.savePendingQuote) {
+    const { guestEmail, guestName, checkIn, checkOut, ratePerNight, discountPercent, guests, total, sourceSubject } = req.body;
+    if (!guestEmail) return res.status(400).json({ error: 'guestEmail mancante' });
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/pending_quotes?on_conflict=guest_email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          Prefer: 'resolution=merge-duplicates,return=representation'
+        },
+        body: JSON.stringify({
+          guest_email: guestEmail,
+          guest_name: guestName || null,
+          check_in: checkIn || null,
+          check_out: checkOut || null,
+          rate_per_night: ratePerNight || null,
+          discount_percent: discountPercent || null,
+          guests: guests || null,
+          total: total || null,
+          source_subject: sourceSubject || null,
+          created_at: new Date().toISOString()
+        })
+      });
+      if (!resp.ok) {
+        const detail = await resp.text();
+        return res.status(500).json({ error: 'Errore Supabase: ' + detail.slice(0, 200) });
+      }
+      const created = await resp.json();
+      return res.status(200).json({ success: true, pendingQuote: created[0] });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -174,6 +230,21 @@ export default async function handler(req, res) {
       }
       const updated = await resp.json();
       return res.status(200).json({ success: true, booking: updated[0] });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Ripulisce il preventivo in sospeso una volta che la prenotazione è stata
+  // confermata per davvero — altrimenti riapparirebbe precompilato anche su
+  // un soggiorno futuro non collegato.
+  if (req.method === 'DELETE' && req.body && req.body.deletePendingQuoteEmail) {
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/pending_quotes?guest_email=eq.${encodeURIComponent(req.body.deletePendingQuoteEmail)}`, {
+        method: 'DELETE',
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+      });
+      return res.status(200).json({ success: true });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
