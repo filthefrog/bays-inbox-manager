@@ -1,4 +1,4 @@
-export default function handler(req, res) {
+export default async function handler(req, res) {
   // Logout assorbito qui da api-logout.js (era 4 righe, non aveva senso come
   // funzione serverless a sé) — GET /api/auth?action=logout
   if (req.query.action === 'logout') {
@@ -7,6 +7,44 @@ export default function handler(req, res) {
       'gmail_refresh=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0'
     ]);
     return res.status(200).json({ ok: true });
+  }
+
+  // Email della persona delle pulizie — salvata nella stessa tabella
+  // app_state già usata per il refresh token Gmail (una riga per chiave).
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+
+  if (req.query.action === 'get-cleaner-email') {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(200).json({ cleanerEmail: null });
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/app_state?id=eq.cleaner_email&select=value`, {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+      });
+      const rows = resp.ok ? await resp.json() : [];
+      return res.status(200).json({ cleanerEmail: rows[0]?.value || null });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  if (req.method === 'POST' && req.query.action === 'save-cleaner-email') {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(500).json({ error: 'Supabase non configurato' });
+    const { cleanerEmail } = req.body || {};
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          Prefer: 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify({ id: 'cleaner_email', value: cleanerEmail || '' })
+      });
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
   }
 
   const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "YOUR_CLIENT_ID";
