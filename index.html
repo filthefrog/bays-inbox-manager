@@ -471,6 +471,81 @@ class ACME {
     await this.loadBookings();
   }
 
+  async openStatistics() {
+    this.view = 'statistics';
+    this.render();
+    await this.loadBookings();
+    this.render();
+  }
+
+  // Camere disponibili — usate per calcolare la percentuale di occupazione.
+  // Aggiorna questo numero se cambia il numero di camere di Domus 106.
+  get roomsCount() { return 2; }
+
+  daysInMonth(monthKey) {
+    const [y, m] = monthKey.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  }
+
+  capitalize(str) {
+    return str ? str.charAt(0).toUpperCase() + str.slice(1) : str;
+  }
+
+  // Statistiche mensili: incasso, notti occupate (e % occupazione sulle
+  // camere disponibili), numero di soggiorni e quanti tra quelli conclusi
+  // hanno una nota associata (proxy di "soggiorno con qualche problema" —
+  // non perfetto, perché le note possono anche essere state scritte in fase
+  // di prenotazione per motivi non legati a un problema).
+  computeMonthlyStats() {
+    const months = {};
+    this.bookings.forEach(b => {
+      if (!b.check_in) return;
+      const monthKey = b.check_in.slice(0, 7);
+      if (!months[monthKey]) {
+        months[monthKey] = { revenue: 0, nights: 0, totalStays: 0, problemStays: 0, daysInMonth: this.daysInMonth(monthKey) };
+      }
+      const m = months[monthKey];
+      if (b.status === 'cancellata') return;
+      m.revenue += Number(b.total) || 0;
+      m.totalStays += 1;
+      try {
+        m.nights += this.computeNightsPreview(b.check_in, b.check_out);
+      } catch (e) {}
+      if (b.status === 'conclusa' && b.notes) m.problemStays += 1;
+    });
+    return months;
+  }
+
+  renderStatistics() {
+    const months = this.computeMonthlyStats();
+    const keys = Object.keys(months).sort().reverse();
+    const rows = keys.map(k => {
+      const m = months[k];
+      const capacity = m.daysInMonth * this.roomsCount;
+      const occupancy = capacity > 0 ? Math.min(100, Math.round((m.nights / capacity) * 100)) : 0;
+      const [y, mm] = k.split('-');
+      const monthLabel = this.capitalize(new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }));
+      return `
+        <div class="detail-card">
+          <div class="section-title" style="margin:0 0 10px;">${monthLabel}</div>
+          <div class="detail-row"><span class="label">Incasso</span><b>€ ${m.revenue.toFixed(2)}</b></div>
+          <div class="detail-row"><span class="label">Notti prenotate</span>${m.nights} / ${capacity}</div>
+          <div class="detail-row"><span class="label">Occupazione</span>${occupancy}%</div>
+          <div class="detail-row"><span class="label">Soggiorni totali</span>${m.totalStays}</div>
+          ${m.problemStays > 0 ? `<div class="detail-row"><span class="label">Con note/problemi</span>${m.problemStays}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ACME</div>
+      </div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Statistiche</h1></div>
+      <div style="font-size:12px; color:var(--text-secondary); margin:-8px 0 16px 4px; line-height:1.4;">Occupazione calcolata su ${this.roomsCount} camere · le notti a cavallo tra due mesi sono contate tutte nel mese del check-in · "Con note/problemi" = soggiorni conclusi con una nota associata</div>
+      ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Calcolo le statistiche…</div>`
+        : (rows || `<div class="empty">Nessuna prenotazione ancora registrata</div>`)}`;
+  }
+
   async loadBookings() {
     this.bookingsLoading = true;
     this.render();
@@ -1295,18 +1370,23 @@ Domus 106`;
     // 2) Solo ORA, con il salvataggio già confermato, apriamo il foglio
     // "Aggiungi a Calendario" — se la pagina va in pausa da qui in poi non
     // ha più conseguenze, il dato è già al sicuro sul server.
-    const icsContent = this.buildICS({
-      guestName, checkIn, checkOut, guestEmail, total,
-      guests: qs.guests, paymentStatus: qs.paymentStatus, notes: qs.notes,
-      code: savedBooking && savedBooking.code
+    //
+    // IMPORTANTE: niente più Blob generato lato client — su iOS, quando l'app
+    // gira come PWA installata (aggiunta alla Home), i download via Blob
+    // spesso non arrivano mai al foglio nativo "Aggiungi a Calendario" e
+    // sembrano "non succedere niente". Una vera richiesta di rete verso un
+    // endpoint che risponde con Content-Type: text/calendar viene invece
+    // sempre riconosciuta correttamente da iOS.
+    const icsParams = new URLSearchParams({
+      guestName, checkIn, checkOut,
+      guestEmail: guestEmail || '',
+      total: total != null ? String(total) : '',
+      guests: qs.guests || '',
+      paymentStatus: qs.paymentStatus || 'da saldare',
+      notes: qs.notes || '',
+      code: (savedBooking && savedBooking.code) || ''
     });
-    const blob = new Blob([icsContent], { type: 'text/calendar' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    window.location.href = '/api/booking-ics?' + icsParams.toString();
 
     qs.confirmed = true;
     qs.confirmedCode = (savedBooking && savedBooking.code) || null;
@@ -1473,6 +1553,7 @@ Domus 106`;
     else if (this.view === 'quoteStandalone') { this.view = 'dashboard'; }
     else if (this.view === 'bookingsList') { this.view = 'dashboard'; }
     else if (this.view === 'bookingHistory') { this.view = 'dashboard'; }
+    else if (this.view === 'statistics') { this.view = 'dashboard'; }
     else if (this.view === 'bookingDetail') { this.view = this.bookingDetailOrigin || 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
@@ -1645,6 +1726,11 @@ Domus 106`;
           <div class="icon gray">🗂️</div>
           <div class="name">Storico prenotazioni</div>
           <div class="card-subtitle">Soggiorni conclusi e passati</div>
+        </div>
+        <div class="card" onclick="app.openStatistics()">
+          <div class="icon purple">📊</div>
+          <div class="name">Statistiche</div>
+          <div class="card-subtitle">Incassi, occupazione, andamento</div>
         </div>
       </div>
       <div class="refresh-row">
@@ -2150,6 +2236,7 @@ Domus 106`;
     else if (this.view === 'quoteStandalone') el.innerHTML = this.renderStandaloneQuote();
     else if (this.view === 'bookingsList') el.innerHTML = this.renderBookingsList();
     else if (this.view === 'bookingHistory') el.innerHTML = this.renderBookingHistory();
+    else if (this.view === 'statistics') el.innerHTML = this.renderStatistics();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     this.updateAppBadge();
   }
