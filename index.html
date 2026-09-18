@@ -668,6 +668,7 @@ class ACME {
       this.selectedBooking = data.booking;
       const idx = this.bookings.findIndex(x => x.id === b.id);
       if (idx !== -1) this.bookings[idx] = data.booking;
+      if (wasActive && this.bookingStatusDraft === 'conclusa') this.notifyCleaningLady(data.booking);
     } catch (e) {
       this.error = e.message;
     }
@@ -1134,7 +1135,48 @@ class ACME {
       });
       const idx = this.bookings.findIndex(x => x.id === booking.id);
       if (idx !== -1) { this.bookings[idx].status = 'conclusa'; this.bookings[idx].notes = combinedNotes; this.bookings[idx].concluded_at = concludedAt; }
+      this.notifyCleaningLady(booking);
     } catch (e) {}
+  }
+
+  // Avvisa la persona delle pulizie che un soggiorno è terminato, incrociando
+  // il calendario per dirle quanto tempo ha prima della prossima prenotazione
+  // (nota: le prenotazioni non sono legate a una camera specifica, quindi se
+  // ci sono più camere questo guarda la prossima in assoluto, non per forza
+  // la stessa stanza appena liberata).
+  async notifyCleaningLady(booking) {
+    try {
+      const settingsRes = await fetch('/api/auth?action=get-cleaner-email');
+      const settingsData = await settingsRes.json().catch(() => ({}));
+      const cleanerEmail = settingsData.cleanerEmail;
+      if (!cleanerEmail) return;
+
+      const nextRes = await fetch('/api/booking?nextCheckinAfter=' + encodeURIComponent(booking.check_out));
+      const nextData = await nextRes.json().catch(() => ({}));
+      const next = nextData.nextBooking;
+
+      const checkOutFmt = this.formatQuoteDate(booking.check_out);
+      let body;
+      if (!next) {
+        body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). Puoi andare a fare le pulizie quando preferisci — al momento non risultano altre prenotazioni in arrivo.`;
+      } else {
+        const nextCheckInFmt = this.formatQuoteDate(next.check_in);
+        const gapDays = Math.round((new Date(next.check_in + 'T00:00:00') - new Date(booking.check_out + 'T00:00:00')) / 86400000);
+        if (gapDays <= 0) {
+          body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). ⚠️ Attenzione: il prossimo ospite (${next.guest_name}) arriva lo STESSO GIORNO — servirebbero le pulizie il prima possibile.`;
+        } else {
+          body = `Ciao! Il soggiorno di ${booking.guest_name} a Domus 106 è terminato oggi (check-out del ${checkOutFmt}). Puoi andare a fare le pulizie con calma: la prossima prenotazione (${next.guest_name}) arriva il ${nextCheckInFmt}, hai ${gapDays} giorn${gapDays === 1 ? 'o' : 'i'} di tempo.`;
+        }
+      }
+
+      await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: cleanerEmail, subject: 'Domus 106 — check-out completato', body })
+      });
+    } catch (e) {
+      // avviso best-effort: un problema qui non deve mai bloccare la chiusura della prenotazione
+    }
   }
 
   advanceCheckoutQueue() {
@@ -1753,6 +1795,24 @@ Domus 106`;
     this.render();
   }
 
+  async setCleanerEmail() {
+    let current = '';
+    try {
+      const res = await fetch('/api/auth?action=get-cleaner-email');
+      const data = await res.json().catch(() => ({}));
+      current = data.cleanerEmail || '';
+    } catch (e) {}
+    const val = window.prompt('Email della persona che fa le pulizie:', current);
+    if (val === null) return; // annullato
+    try {
+      await fetch('/api/auth?action=save-cleaner-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cleanerEmail: val.trim() })
+      });
+    } catch (e) {}
+  }
+
   renderSetup() {
     return `
       <div class="topbar"><div class="eyebrow">Configurazione</div><h1>ACME</h1></div>
@@ -1862,6 +1922,11 @@ Domus 106`;
         <div class="settings-row" onclick="app.togglePushNotifications()">
           <span class="settings-icon">${this.pushEnabled ? '🔕' : '🔔'}</span>
           <span class="settings-label">${this.pushEnabled ? 'Disattiva notifiche' : 'Attiva notifiche'}</span>
+          <span class="settings-chevron">›</span>
+        </div>
+        <div class="settings-row" onclick="app.setCleanerEmail()">
+          <span class="settings-icon">🧹</span>
+          <span class="settings-label">Email colf/pulizie</span>
           <span class="settings-chevron">›</span>
         </div>
       </div>`;
@@ -2228,6 +2293,7 @@ Domus 106`;
     this.pendingConcludeBooking = null;
     const area = document.getElementById('bookingResultsArea');
     if (area) area.innerHTML = this.renderBookingRows(); else this.render();
+    this.notifyCleaningLady(booking);
   }
 
   renderBookingsList() {
