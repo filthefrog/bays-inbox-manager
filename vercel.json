@@ -1,5 +1,0 @@
-{
-  "crons": [
-    { "path": "/api/cron-checkout-reminder", "schedule": "0 12 * * *" }
-  ]
-}
