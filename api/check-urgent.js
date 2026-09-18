@@ -6,6 +6,10 @@ import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
 // ogni 5 minuti. Fa il minimo indispensabile per restare economico:
 // - analizza con Claude SOLO le email mai viste prima (stessa cache di sempre)
 // - se non c'è nessuna email nuova, non chiama Claude nemmeno una volta
+// - una volta al giorno, verso le 14:00 ora italiana, controlla anche se ci
+//   sono check-out in giornata e manda un promemoria push (indipendente da
+//   Gmail: se Gmail ha un problema, questo controllo funziona comunque)
+
 export default async function handler(req, res) {
   const secret = req.headers['x-cron-secret'] || req.query.secret;
   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
@@ -23,6 +27,42 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY mancante nelle variabili Vercel' });
   }
 
+  // --- Promemoria check-out del giorno (~14:00 ora italiana) ---------------
+  // Indipendente dal resto: gira anche se Gmail non è raggiungibile. La
+  // finestra hourPart===14 && minutePart<5 fa sì che, girando ogni 5 minuti,
+  // scatti una volta sola al giorno (il primo passaggio tra le 14:00 e le 14:04).
+  let checkoutReminder = { attempted: false, sent: 0 };
+  try {
+    const romeParts = new Intl.DateTimeFormat('it-IT', {
+      timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(new Date());
+    const hourPart = Number(romeParts.find(p => p.type === 'hour').value);
+    const minutePart = Number(romeParts.find(p => p.type === 'minute').value);
+
+    if (hourPart === 14 && minutePart < 5) {
+      checkoutReminder.attempted = true;
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+      const bookingsResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=guest_name,code&check_out=eq.${today}&status=neq.cancellata&status=neq.conclusa`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      const checkoutsToday = bookingsResp.ok ? await bookingsResp.json() : [];
+      if (checkoutsToday.length > 0) {
+        await sendPushToAll({
+          title: checkoutsToday.length === 1
+            ? `Check-out oggi: ${checkoutsToday[0].guest_name}`
+            : `${checkoutsToday.length} check-out oggi`,
+          body: checkoutsToday.map(b => `${b.guest_name}${b.code ? ' (' + b.code + ')' : ''}`).join(', '),
+          url: '/'
+        }).catch(() => {});
+        checkoutReminder.sent = checkoutsToday.length;
+      }
+    }
+  } catch (err) {
+    console.error('Errore promemoria check-out:', err);
+  }
+
+  // --- Analisi email + push per le urgenti ----------------------------------
   try {
     // Recupera il refresh token Gmail salvato al login
     const tokenResp = await fetch(`${SUPABASE_URL}/rest/v1/app_state?id=eq.gmail_refresh_token&select=value`, {
@@ -30,29 +70,32 @@ export default async function handler(req, res) {
     });
     const tokenRows = tokenResp.ok ? await tokenResp.json() : [];
     const refreshToken = tokenRows[0]?.value;
+
     if (!refreshToken) {
-      return res.status(200).json({ skipped: true, reason: 'Nessun account Gmail ancora collegato' });
+      return res.status(200).json({ skipped: true, reason: 'Nessun account Gmail ancora collegato', checkoutReminder });
     }
 
     let token;
     try {
       token = await getFreshAccessToken(refreshToken);
     } catch (err) {
-      return res.status(200).json({ skipped: true, reason: 'Token Gmail scaduto, serve riconnettersi dall\'app' });
+      return res.status(200).json({ skipped: true, reason: 'Token Gmail scaduto, serve riconnettersi dall\'app', checkoutReminder });
     }
 
     const listResponse = await fetch(
       "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me") + "&maxResults=8",
       { headers: { Authorization: `Bearer ${token}` } }
     );
+
     if (!listResponse.ok) {
-      return res.status(200).json({ skipped: true, reason: 'Gmail non raggiungibile in questo momento' });
+      return res.status(200).json({ skipped: true, reason: 'Gmail non raggiungibile in questo momento', checkoutReminder });
     }
 
     const listData = await listResponse.json();
     const messageIds = listData.messages || [];
+
     if (messageIds.length === 0) {
-      return res.status(200).json({ checked: 0, newlyAnalyzed: 0, urgent: 0 });
+      return res.status(200).json({ checked: 0, newlyAnalyzed: 0, urgent: 0, checkoutReminder });
     }
 
     const detailResults = await Promise.allSettled(
@@ -72,6 +115,7 @@ export default async function handler(req, res) {
         };
       })
     );
+
     const emails = detailResults.filter(r => r.status === 'fulfilled').map(r => r.value);
 
     // Stessa cache di sempre: analizza SOLO le email mai viste prima. Questo è
@@ -83,10 +127,11 @@ export default async function handler(req, res) {
     });
     const cachedRows = cacheResp.ok ? await cacheResp.json() : [];
     const cachedIds = new Set(cachedRows.map(r => r.id));
+
     const toAnalyze = emails.filter(e => !cachedIds.has(e.id));
 
     if (toAnalyze.length === 0) {
-      return res.status(200).json({ checked: emails.length, newlyAnalyzed: 0, urgent: 0 });
+      return res.status(200).json({ checked: emails.length, newlyAnalyzed: 0, urgent: 0, checkoutReminder });
     }
 
     const results = await Promise.allSettled(toAnalyze.map(email => analyzeAndRespond(email, CLAUDE_KEY)));
@@ -126,9 +171,10 @@ export default async function handler(req, res) {
       }).catch(() => {});
     }
 
-    return res.status(200).json({ checked: emails.length, newlyAnalyzed: toAnalyze.length, urgent: urgent.length });
+    return res.status(200).json({ checked: emails.length, newlyAnalyzed: toAnalyze.length, urgent: urgent.length, checkoutReminder });
+
   } catch (error) {
     console.error('Errore check-urgent:', error);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message, checkoutReminder });
   }
 }
