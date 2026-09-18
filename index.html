@@ -438,6 +438,7 @@ class ACME {
     this.currentCheckoutReview = null;
     this.checkoutNoteDraft = '';
     this.bookingDetailOrigin = null;
+    this.selectedStatsMonth = null;
   }
 
   emptyQuoteState() {
@@ -475,6 +476,12 @@ class ACME {
     this.view = 'statistics';
     this.render();
     await this.loadBookings();
+    this.render();
+  }
+
+  openStatsMonth(monthKey) {
+    this.selectedStatsMonth = monthKey;
+    this.view = 'statisticsMonth';
     this.render();
   }
 
@@ -526,13 +533,14 @@ class ACME {
       const [y, mm] = k.split('-');
       const monthLabel = this.capitalize(new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }));
       return `
-        <div class="detail-card">
+        <div class="detail-card" style="cursor:pointer;" onclick="app.openStatsMonth('${k}')">
           <div class="section-title" style="margin:0 0 10px;">${monthLabel}</div>
           <div class="detail-row"><span class="label">Incasso</span><b>€ ${m.revenue.toFixed(2)}</b></div>
           <div class="detail-row"><span class="label">Notti prenotate</span>${m.nights} / ${capacity}</div>
           <div class="detail-row"><span class="label">Occupazione</span>${occupancy}%</div>
           <div class="detail-row"><span class="label">Soggiorni totali</span>${m.totalStays}</div>
           ${m.problemStays > 0 ? `<div class="detail-row"><span class="label">Con note/problemi</span>${m.problemStays}</div>` : ''}
+          <div style="font-size:12px; color:var(--accent); font-weight:600; margin-top:8px;">Vedi tutti i clienti ›</div>
         </div>`;
     }).join('');
 
@@ -544,6 +552,48 @@ class ACME {
       <div style="font-size:12px; color:var(--text-secondary); margin:-8px 0 16px 4px; line-height:1.4;">Occupazione calcolata su ${this.roomsCount} camere · le notti a cavallo tra due mesi sono contate tutte nel mese del check-in · "Con note/problemi" = soggiorni conclusi con una nota associata</div>
       ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Calcolo le statistiche…</div>`
         : (rows || `<div class="empty">Nessuna prenotazione ancora registrata</div>`)}`;
+  }
+
+  renderStatisticsMonth() {
+    const key = this.selectedStatsMonth;
+    const [y, mm] = key.split('-');
+    const monthLabel = this.capitalize(new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }));
+    const clients = this.bookings
+      .filter(b => (b.check_in || '').slice(0, 7) === key)
+      .sort((a, b) => (a.check_in || '').localeCompare(b.check_in || ''));
+
+    const rows = clients.map(b => {
+      const checkInFmt = this.formatQuoteDate(b.check_in);
+      const checkOutFmt = this.formatQuoteDate(b.check_out);
+      const safeBooking = JSON.stringify(b).replace(/'/g, "&#39;");
+      const status = b.status || 'confermata';
+      const statusClass = 'status-' + status.replace(/\s+/g, '-');
+      const payment = b.payment_status || 'da saldare';
+      const paymentClass = 'chip-pay-' + payment.replace(/\s+/g, '-');
+      const paymentLabel = payment === 'da saldare' ? 'Da saldare' : (payment === 'acconto versato' ? 'Acconto' : 'Saldata');
+      return `
+        <div class="booking-row" onclick='app.openBookingDetail(${safeBooking})'>
+          <div class="row-top">
+            <div class="name">${this.escape(b.guest_name)}</div>
+            ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+          </div>
+          ${b.rate_per_night ? `<div class="rate-info">€ ${Number(b.rate_per_night).toFixed(2)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
+          <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
+          <div class="chip-row">
+            <span class="chip ${statusClass}">${this.escape(status)}</span>
+            <span class="chip ${paymentClass}">${paymentLabel}</span>
+            ${b.guests ? `<span class="chip chip-guests">👤 ${b.guests}</span>` : ''}
+            <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ Statistiche</div>
+      </div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>${monthLabel}</h1></div>
+      ${rows || `<div class="empty">Nessun cliente con check-in in questo mese</div>`}`;
   }
 
   async loadBookings() {
@@ -1378,6 +1428,7 @@ Domus 106`;
     // endpoint che risponde con Content-Type: text/calendar viene invece
     // sempre riconosciuta correttamente da iOS.
     const icsParams = new URLSearchParams({
+      ics: '1',
       guestName, checkIn, checkOut,
       guestEmail: guestEmail || '',
       total: total != null ? String(total) : '',
@@ -1386,7 +1437,7 @@ Domus 106`;
       notes: qs.notes || '',
       code: (savedBooking && savedBooking.code) || ''
     });
-    window.location.href = '/api/booking-ics?' + icsParams.toString();
+    window.location.href = '/api/booking?' + icsParams.toString();
 
     qs.confirmed = true;
     qs.confirmedCode = (savedBooking && savedBooking.code) || null;
@@ -1554,6 +1605,7 @@ Domus 106`;
     else if (this.view === 'bookingsList') { this.view = 'dashboard'; }
     else if (this.view === 'bookingHistory') { this.view = 'dashboard'; }
     else if (this.view === 'statistics') { this.view = 'dashboard'; }
+    else if (this.view === 'statisticsMonth') { this.view = 'statistics'; this.selectedStatsMonth = null; }
     else if (this.view === 'bookingDetail') { this.view = this.bookingDetailOrigin || 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
@@ -1874,7 +1926,6 @@ Domus 106`;
             </div>
           </div>
           ${this.renderGuestSelector('quoteState', this.quoteState.guests)}
-          ${this.renderPaymentSelector('quoteState', this.quoteState.paymentStatus)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('quoteState','notes', this.value)">${this.escape(this.quoteState.notes)}</textarea>
           <div style="display:flex; gap:10px;">
@@ -1969,7 +2020,6 @@ Domus 106`;
             </div>
           </div>
           ${this.renderGuestSelector('standaloneQuoteState', qs.guests)}
-          ${this.renderPaymentSelector('standaloneQuoteState', qs.paymentStatus)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('standaloneQuoteState','notes', this.value)">${this.escape(qs.notes)}</textarea>
           <div style="display:flex; gap:10px;">
@@ -2237,6 +2287,7 @@ Domus 106`;
     else if (this.view === 'bookingsList') el.innerHTML = this.renderBookingsList();
     else if (this.view === 'bookingHistory') el.innerHTML = this.renderBookingHistory();
     else if (this.view === 'statistics') el.innerHTML = this.renderStatistics();
+    else if (this.view === 'statisticsMonth') el.innerHTML = this.renderStatisticsMonth();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     this.updateAppBadge();
   }
