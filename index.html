@@ -1611,7 +1611,7 @@ Domus 106`;
   }
 
   async reconnectGmail() {
-    await fetch('/api/logout');
+    await fetch('/api/auth?action=logout');
     this.loginWithGmail();
   }
 
