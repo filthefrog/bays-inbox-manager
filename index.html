@@ -389,6 +389,13 @@
   .settings-row:active { background: var(--bg); }
   .settings-row + .settings-row { border-top: 1px solid rgba(60,60,67,0.08); }
   .settings-row .settings-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
+  .settings-icon-badge {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .settings-icon-badge.blue { background: rgba(10,110,189,0.12); }
+  .settings-icon-badge.gray { background: rgba(142,142,147,0.12); }
+  .settings-icon-badge.purple { background: rgba(175,82,222,0.12); }
   .settings-row .settings-label { flex: 1; font-size: 15px; color: var(--text); }
   .settings-row .settings-chevron { color: var(--text-secondary); font-size: 16px; }
 </style>
@@ -1947,28 +1954,31 @@ Domus 106`;
       ${this.error ? `<div class="error-banner">${this.error}</div>` : ''}
       ${hero}
       <div class="grid">${cards}</div>
-      <div class="grid" style="margin-top:12px;">
-        <div class="card" onclick="app.openStandaloneQuote()">
-          <div class="icon blue">📄</div>
-          <div class="name">Genera preventivo</div>
-          <div class="card-subtitle">Senza partire da una mail</div>
+
+      <div class="section-title" style="margin-top:28px;">Gestione</div>
+      <div class="settings-card">
+        <div class="settings-row" onclick="app.openStandaloneQuote()">
+          <span class="settings-icon-badge blue">📄</span>
+          <span class="settings-label">Genera preventivo</span>
+          <span class="settings-chevron">›</span>
         </div>
-        <div class="card" onclick="app.openBookingsList()">
-          <div class="icon blue">📅</div>
-          <div class="name">Prenotazioni confermate</div>
-          <div class="card-subtitle">Occupazione a colpo d'occhio</div>
+        <div class="settings-row" onclick="app.openBookingsList()">
+          <span class="settings-icon-badge blue">📅</span>
+          <span class="settings-label">Prenotazioni confermate</span>
+          <span class="settings-chevron">›</span>
         </div>
-        <div class="card" onclick="app.openBookingHistory()">
-          <div class="icon gray">🗂️</div>
-          <div class="name">Storico prenotazioni</div>
-          <div class="card-subtitle">Soggiorni conclusi e passati</div>
+        <div class="settings-row" onclick="app.openBookingHistory()">
+          <span class="settings-icon-badge gray">🗂️</span>
+          <span class="settings-label">Storico prenotazioni</span>
+          <span class="settings-chevron">›</span>
         </div>
-        <div class="card" onclick="app.openStatistics()">
-          <div class="icon purple">📊</div>
-          <div class="name">Statistiche</div>
-          <div class="card-subtitle">Incassi, occupazione, andamento</div>
+        <div class="settings-row" onclick="app.openStatistics()">
+          <span class="settings-icon-badge purple">📊</span>
+          <span class="settings-label">Statistiche</span>
+          <span class="settings-chevron">›</span>
         </div>
       </div>
+
       <div class="refresh-row">
         <div class="status">${updatedText}</div>
         <button class="icon-btn" onclick="app.loadEmails()">↻</button>
