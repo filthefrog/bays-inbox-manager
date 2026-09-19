@@ -177,6 +177,27 @@
   .hero-card.has-items .hero-icon { background: rgba(255,59,48,0.14); }
   .hero-card.has-items .count { color: var(--red); }
 
+  .hero-row { display: flex; gap: 12px; margin-bottom: 12px; }
+  .hero-half {
+    flex: 1; background: var(--card); border: 1px solid rgba(60,60,67,0.06);
+    border-radius: var(--radius-lg); padding: 16px; cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .hero-half:active { transform: scale(0.97); }
+  .hero-half .hero-icon {
+    width: 40px; height: 40px; border-radius: var(--radius-sm);
+    background: rgba(142,142,147,0.12); display: flex; align-items: center; justify-content: center;
+    font-size: 19px; margin-bottom: 10px;
+  }
+  .hero-half .name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .hero-half .count { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-secondary); }
+  .hero-half.tone-red.has-items { background: rgba(255,59,48,0.08); border-color: transparent; box-shadow: 0 4px 16px rgba(255,59,48,0.08); }
+  .hero-half.tone-red.has-items .hero-icon { background: rgba(255,59,48,0.14); }
+  .hero-half.tone-red.has-items .count { color: var(--red); }
+  .hero-half.tone-amber.has-items { background: rgba(255,159,10,0.1); border-color: transparent; box-shadow: 0 4px 16px rgba(255,159,10,0.1); }
+  .hero-half.tone-amber.has-items .hero-icon { background: rgba(255,159,10,0.2); }
+  .hero-half.tone-amber.has-items .count { color: #b25900; }
+
   .icon.red { background: rgba(255,59,48,0.12); }
   .icon.blue { background: rgba(10,110,189,0.12); }
   .icon.orange { background: rgba(255,149,0,0.12); }
@@ -184,6 +205,7 @@
   .icon.teal { background: rgba(90,200,250,0.12); }
   .icon.green { background: rgba(52,199,89,0.12); }
   .icon.gray { background: rgba(142,142,147,0.12); }
+  .icon.amber { background: rgba(255,159,10,0.16); }
 
   .refresh-row { display: flex; justify-content: space-between; align-items: center; margin: 24px 0 4px; padding: 0 4px; }
   .refresh-row .status { font-size: 13px; color: var(--text-secondary); }
@@ -407,6 +429,7 @@
 <script>
 const CATEGORY_META = {
   'Lamentela':               { icon: '⚠️', color: 'red', label: 'Lamentela' },
+  'Da verificare':           { icon: '🔍', color: 'amber', label: 'Da verificare' },
   'Prenotazione':            { icon: '📅', color: 'blue', label: 'Richieste prenotazioni' },
   'Problema tecnico':        { icon: '🔧', color: 'orange', label: 'Problema tecnico' },
   'Fatturazione':            { icon: '💳', color: 'purple', label: 'Fatturazione' },
@@ -1922,17 +1945,22 @@ Domus 106`;
 
   renderDashboard() {
     const entries = Object.entries(CATEGORY_META);
-    const [heroCat, heroMeta] = entries.find(([cat]) => cat === 'Lamentela');
-    const gridEntries = entries.filter(([cat]) => cat !== 'Lamentela');
+    const heroCats = ['Lamentela', 'Da verificare'];
+    const gridEntries = entries.filter(([cat]) => !heroCats.includes(cat));
 
-    const heroCount = this.unresolvedCount(heroCat);
+    const toneByCat = { 'Lamentela': 'red', 'Da verificare': 'amber' };
     const hero = `
-      <div class="hero-card ${heroCount > 0 ? 'has-items' : ''}" onclick="app.openCategory('${heroCat}')">
-        <div class="hero-icon">${heroMeta.icon}</div>
-        <div class="hero-text">
-          <div class="name">${heroMeta.label || heroCat}</div>
-          <div class="count">${heroCount}</div>
-        </div>
+      <div class="hero-row">
+        ${heroCats.map(cat => {
+          const meta = CATEGORY_META[cat];
+          const count = this.unresolvedCount(cat);
+          return `
+            <div class="hero-half tone-${toneByCat[cat]} ${count > 0 ? 'has-items' : ''}" onclick="app.openCategory('${cat}')">
+              <div class="hero-icon">${meta.icon}</div>
+              <div class="name">${meta.label || cat}</div>
+              <div class="count">${count}</div>
+            </div>`;
+        }).join('')}
       </div>`;
 
     const cards = gridEntries.map(([cat, meta]) => {
