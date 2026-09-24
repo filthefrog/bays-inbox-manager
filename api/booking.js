@@ -75,6 +75,34 @@ export default async function handler(req, res) {
     }
   }
 
+  // Promemoria operativi: pulizie da confermare (mail mandata alla colf ma
+  // mai confermata da Filippo) e pagamenti da sollecitare (ancora "da
+  // saldare" con check-in vicino o già passato).
+  if (req.method === 'GET' && req.query.reminders === '1') {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const soon = new Date();
+      soon.setDate(soon.getDate() + 2);
+      const soonStr = soon.toISOString().slice(0, 10);
+
+      const cleanerResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=id,guest_name,check_out,code&status=eq.conclusa&cleaner_notified=eq.true&cleaner_confirmed=eq.false&order=check_out.desc`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      const paymentResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=id,guest_name,check_in,code&payment_status=eq.da saldare&status=neq.cancellata&status=neq.conclusa&check_in=lte.${soonStr}&order=check_in.asc`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+
+      return res.status(200).json({
+        cleanerPending: cleanerResp.ok ? await cleanerResp.json() : [],
+        paymentPending: paymentResp.ok ? await paymentResp.json() : []
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   // Prossima prenotazione dopo una certa data — usata per avvisare la colf
   // di quanto tempo ha per le pulizie dopo un check-out.
   if (req.method === 'GET' && req.query.nextCheckinAfter) {
@@ -219,7 +247,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { id, notes, status, checkoutReviewed, paymentStatus, concludedAt } = req.body || {};
+    const { id, notes, status, checkoutReviewed, paymentStatus, concludedAt, cleanerNotified, cleanerConfirmed } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id mancante' });
     const patch = {};
     if (notes !== undefined) patch.notes = notes;
@@ -227,6 +255,8 @@ export default async function handler(req, res) {
     if (checkoutReviewed !== undefined) patch.checkout_reviewed = checkoutReviewed;
     if (paymentStatus !== undefined) patch.payment_status = paymentStatus;
     if (concludedAt !== undefined) patch.concluded_at = concludedAt;
+    if (cleanerNotified !== undefined) patch.cleaner_notified = cleanerNotified;
+    if (cleanerConfirmed !== undefined) patch.cleaner_confirmed = cleanerConfirmed;
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
     try {
       const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
