@@ -38,6 +38,21 @@
   .topbar .eyebrow { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 2px; }
   .topbar h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
 
+  .reminder-badge {
+    position: relative; width: 42px; height: 42px; border-radius: 50%;
+    background: var(--card); border: 1px solid rgba(60,60,67,0.08);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; cursor: pointer; margin-top: 4px; flex-shrink: 0;
+  }
+  .reminder-badge:active { transform: scale(0.94); }
+  .reminder-count {
+    position: absolute; top: -4px; right: -4px;
+    background: var(--red); color: white; font-size: 11px; font-weight: 700;
+    min-width: 18px; height: 18px; border-radius: 9px; padding: 0 4px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid var(--bg);
+  }
+
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .card {
     background: var(--card);
@@ -469,6 +484,7 @@ class ACME {
     this.checkoutNoteDraft = '';
     this.bookingDetailOrigin = null;
     this.selectedStatsMonth = null;
+    this.reminders = { cleanerPending: [], paymentPending: [] };
   }
 
   emptyQuoteState() {
@@ -639,6 +655,88 @@ class ACME {
     }
     this.bookingsLoading = false;
     this.render();
+  }
+
+  // Promemoria operativi: pulizie da confermare + pagamenti da sollecitare.
+  // Le mail "Da verificare" in sospeso non servono una chiamata a parte,
+  // sono già disponibili via unresolvedCount('Da verificare').
+  async loadReminders() {
+    try {
+      const res = await fetch('/api/booking?reminders=1');
+      const data = await res.json().catch(() => ({}));
+      this.reminders = {
+        cleanerPending: data.cleanerPending || [],
+        paymentPending: data.paymentPending || []
+      };
+    } catch (e) {}
+    this.render();
+  }
+
+  reminderCount() {
+    return this.reminders.cleanerPending.length + this.reminders.paymentPending.length + this.unresolvedCount('Da verificare');
+  }
+
+  openReminders() {
+    this.view = 'reminders';
+    this.render();
+  }
+
+  async openReminderBooking(code) {
+    try {
+      const res = await fetch('/api/booking?code=' + encodeURIComponent(code));
+      const data = await res.json().catch(() => ({}));
+      const full = (data.bookings || [])[0];
+      if (full) this.openBookingDetail(full);
+    } catch (e) {}
+  }
+
+  async confirmCleaner(id) {
+    try {
+      await fetch('/api/booking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, cleanerConfirmed: true })
+      });
+    } catch (e) {}
+    this.reminders.cleanerPending = this.reminders.cleanerPending.filter(b => b.id !== id);
+    this.render();
+  }
+
+  renderReminders() {
+    const { cleanerPending, paymentPending } = this.reminders;
+    const verifyCount = this.unresolvedCount('Da verificare');
+
+    const cleanerRows = cleanerPending.map(b => `
+      <div class="booking-row">
+        <div class="name">${this.escape(b.guest_name)}</div>
+        <div class="dates">Check-out del <b>${this.formatQuoteDate(b.check_out)}</b>${b.code ? ' · ' + this.escape(b.code) : ''}</div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-send" onclick="app.confirmCleaner(${b.id})">✓ Confermato con lei</button>
+        </div>
+      </div>`).join('');
+
+    const paymentRows = paymentPending.map(b => `
+      <div class="booking-row" ${b.code ? `onclick="app.openReminderBooking('${b.code}')"` : ''}>
+        <div class="name">${this.escape(b.guest_name)}</div>
+        <div class="dates">Check-in <b>${this.formatQuoteDate(b.check_in)}</b>${b.code ? ' · ' + this.escape(b.code) : ''} — ancora da saldare</div>
+      </div>`).join('');
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ACME</div>
+      </div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Promemoria</h1></div>
+
+      <div class="section-title">Pulizie da confermare</div>
+      ${cleanerRows || `<div class="empty" style="padding:24px;">Niente in sospeso</div>`}
+
+      <div class="section-title">Pagamenti da sollecitare</div>
+      ${paymentRows || `<div class="empty" style="padding:24px;">Niente in sospeso</div>`}
+
+      <div class="section-title">Mail da verificare</div>
+      ${verifyCount > 0
+        ? `<div class="booking-row" onclick="app.openCategory('Da verificare')"><div class="name">${verifyCount} mail non classificate con sicurezza</div><div class="dates">Tocca per aprirle</div></div>`
+        : `<div class="empty" style="padding:24px;">Niente in sospeso</div>`}`;
   }
 
   updateBookingSearch(value) {
@@ -819,6 +917,7 @@ class ACME {
       this.lastUpdated = new Date();
       if (this.view === 'dashboard') this.render();
     } catch (e) {}
+    this.loadReminders();
   }
 
   saveKey() {
@@ -851,6 +950,7 @@ class ACME {
     }
     this.render();
     this.checkPendingCheckoutReviews();
+    this.loadReminders();
   }
 
   async loginWithGmail() {
@@ -1228,6 +1328,17 @@ class ACME {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: cleanerEmail, subject: 'Domus 106 — check-out completato', body })
       });
+
+      // Segna che la mail è partita: da qui in poi compare il promemoria
+      // "conferma che gliel'hai detto" finché non lo chiudi tu a mano.
+      await fetch('/api/booking', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: booking.id, cleanerNotified: true, cleanerConfirmed: false })
+      }).catch(() => {});
+      const idx = this.bookings.findIndex(x => x.id === booking.id);
+      if (idx !== -1) { this.bookings[idx].cleaner_notified = true; this.bookings[idx].cleaner_confirmed = false; }
+      this.loadReminders();
     } catch (e) {
       // avviso best-effort: un problema qui non deve mai bloccare la chiusura della prenotazione
     }
@@ -1802,6 +1913,7 @@ Domus 106`;
     else if (this.view === 'bookingHistory') { this.view = 'dashboard'; }
     else if (this.view === 'statistics') { this.view = 'dashboard'; }
     else if (this.view === 'statisticsMonth') { this.view = 'statistics'; this.selectedStatsMonth = null; }
+    else if (this.view === 'reminders') { this.view = 'dashboard'; }
     else if (this.view === 'bookingDetail') { this.view = this.bookingDetailOrigin || 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
@@ -1977,8 +2089,15 @@ Domus 106`;
       ? 'Aggiornato ' + this.lastUpdated.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
       : '';
 
+    const reminderCount = this.reminderCount();
+
     return `
-      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>ACME</h1></div>
+      <div class="topbar" style="display:flex; align-items:flex-start; justify-content:space-between;">
+        <div><div class="eyebrow">Domus 106</div><h1>ACME</h1></div>
+        <button class="reminder-badge" onclick="app.openReminders()" title="Promemoria">
+          🔔${reminderCount > 0 ? `<span class="reminder-count">${reminderCount}</span>` : ''}
+        </button>
+      </div>
       ${this.error ? `<div class="error-banner">${this.error}</div>` : ''}
       ${hero}
       <div class="grid">${cards}</div>
@@ -2518,6 +2637,7 @@ Domus 106`;
     else if (this.view === 'bookingHistory') el.innerHTML = this.renderBookingHistory();
     else if (this.view === 'statistics') el.innerHTML = this.renderStatistics();
     else if (this.view === 'statisticsMonth') el.innerHTML = this.renderStatisticsMonth();
+    else if (this.view === 'reminders') el.innerHTML = this.renderReminders();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     this.updateAppBadge();
   }
