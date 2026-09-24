@@ -706,20 +706,34 @@ class ACME {
     const { cleanerPending, paymentPending } = this.reminders;
     const verifyCount = this.unresolvedCount('Da verificare');
 
-    const cleanerRows = cleanerPending.map(b => `
+    const cleanerRows = cleanerPending.map(b => {
+      const nextInfo = b.next_check_in
+        ? `Prossimo check-in: <b>${this.escape(b.next_guest_name)}</b> il <b>${this.formatQuoteDate(b.next_check_in)}</b> — ${this.formatHoursCountdown(this.hoursUntilNextCheckin(b.check_out, b.next_check_in))}`
+        : `Nessuna prenotazione in arrivo al momento`;
+      return `
       <div class="booking-row">
         <div class="name">${this.escape(b.guest_name)}</div>
         <div class="dates">Check-out del <b>${this.formatQuoteDate(b.check_out)}</b>${b.code ? ' · ' + this.escape(b.code) : ''}</div>
+        <div class="rate-info" style="margin-top:4px;">${nextInfo}</div>
         <div class="btn-row" style="margin-top:10px;">
           <button class="btn btn-send" onclick="app.confirmCleaner(${b.id})">✓ Confermato con lei</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
-    const paymentRows = paymentPending.map(b => `
+    const paymentRows = paymentPending.map(b => {
+      const diffDays = Math.round((new Date(b.check_in + 'T00:00:00') - new Date()) / 86400000);
+      const urgency = diffDays < 0
+        ? `⚠️ check-in già passato da ${Math.abs(diffDays)} giorn${Math.abs(diffDays) === 1 ? 'o' : 'i'}`
+        : diffDays === 0 ? '⚠️ check-in oggi stesso'
+        : `check-in tra ${diffDays} giorn${diffDays === 1 ? 'o' : 'i'}`;
+      return `
       <div class="booking-row" ${b.code ? `onclick="app.openReminderBooking('${b.code}')"` : ''}>
         <div class="name">${this.escape(b.guest_name)}</div>
-        <div class="dates">Check-in <b>${this.formatQuoteDate(b.check_in)}</b>${b.code ? ' · ' + this.escape(b.code) : ''} — ancora da saldare</div>
-      </div>`).join('');
+        <div class="dates">Check-in <b>${this.formatQuoteDate(b.check_in)}</b>${b.code ? ' · ' + this.escape(b.code) : ''}</div>
+        <div class="rate-info" style="margin-top:4px;">${urgency} — ancora da saldare</div>
+      </div>`;
+    }).join('');
 
     return `
       <div class="list-header">
