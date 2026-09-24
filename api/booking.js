@@ -94,8 +94,27 @@ export default async function handler(req, res) {
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
       );
 
+      let cleanerPending = cleanerResp.ok ? await cleanerResp.json() : [];
+
+      // Per ogni pulizia da confermare, aggiungo la prossima prenotazione
+      // reale — così il promemoria dice "check-in di [nome] il [data]",
+      // non solo "qualcuno non ha confermato".
+      cleanerPending = await Promise.all(cleanerPending.map(async (b) => {
+        try {
+          const nextResp = await fetch(
+            `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=guest_name,check_in&check_in=gte.${b.check_out}&status=neq.cancellata&status=neq.conclusa&order=check_in.asc&limit=1`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+          );
+          const nextRows = nextResp.ok ? await nextResp.json() : [];
+          const next = nextRows[0];
+          return { ...b, next_check_in: next?.check_in || null, next_guest_name: next?.guest_name || null };
+        } catch (e) {
+          return { ...b, next_check_in: null, next_guest_name: null };
+        }
+      }));
+
       return res.status(200).json({
-        cleanerPending: cleanerResp.ok ? await cleanerResp.json() : [],
+        cleanerPending,
         paymentPending: paymentResp.ok ? await paymentResp.json() : []
       });
     } catch (err) {
