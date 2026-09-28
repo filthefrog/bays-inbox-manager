@@ -38,6 +38,12 @@
   .topbar .eyebrow { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 2px; }
   .topbar h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
 
+  .test-toggle {
+    width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--bg);
+    font-size: 16px; cursor: pointer; flex-shrink: 0; padding: 0;
+  }
+  .test-checks { margin: 8px 0 0 18px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+
   .reminder-badge {
     position: relative; width: 42px; height: 42px; border-radius: 50%;
     background: var(--card); border: 1px solid rgba(60,60,67,0.08);
@@ -485,6 +491,8 @@ class ACME {
     this.bookingDetailOrigin = null;
     this.selectedStatsMonth = null;
     this.reminders = { cleanerPending: [], paymentPending: [] };
+    this.testLab = { data: null, loading: false, busy: null, message: null, error: null };
+    this.testChecks = JSON.parse(localStorage.getItem('acme_test_checks') || '{}');
   }
 
   emptyQuoteState() {
@@ -674,6 +682,154 @@ class ACME {
 
   reminderCount() {
     return this.reminders.cleanerPending.length + this.reminders.paymentPending.length + this.unresolvedCount('Da verificare');
+  }
+
+  // ---------- Laboratorio di test ----------
+  async openTestLab() {
+    this.view = 'testLab';
+    this.testLab.message = null;
+    this.testLab.error = null;
+    this.render();
+    await this.loadTestLab();
+  }
+
+  async loadTestLab() {
+    this.testLab.loading = true;
+    this.render();
+    try {
+      const res = await fetch('/api/test-lab?action=status');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Errore nel caricamento');
+      this.testLab.data = data;
+    } catch (e) {
+      this.testLab.error = e.message;
+    }
+    this.testLab.loading = false;
+    this.render();
+  }
+
+  async testLabAction(action, body, busyLabel, doneMsg) {
+    const t = this.testLab;
+    t.busy = busyLabel;
+    t.message = null;
+    t.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/test-lab?action=' + action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Operazione fallita');
+      t.message = doneMsg(data);
+      if (action === 'seed-emails' || action === 'cleanup') await this.refreshInboxQuiet();
+      this.bookings = [];
+      await this.loadReminders();
+    } catch (e) {
+      t.error = e.message;
+    }
+    t.busy = null;
+    await this.loadTestLab();
+  }
+
+  // Aggiorna la dashboard senza cambiare schermata (analizza con Claude le mail nuove)
+  async refreshInboxQuiet() {
+    try {
+      const res = await fetch('/api/emails-analyzed', {
+        headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      this.byCategory = data.byCategory || {};
+      this.lastUpdated = new Date();
+    } catch (e) {}
+  }
+
+  cycleTestCheck(id) {
+    const next = { '': 'ok', 'ok': 'ko', 'ko': '' };
+    this.testChecks[id] = next[this.testChecks[id] || ''];
+    localStorage.setItem('acme_test_checks', JSON.stringify(this.testChecks));
+    this.render();
+  }
+
+  confirmTestCleanup() {
+    this.showConfirmDialog({
+      title: 'Eliminare tutti i dati di test?',
+      desc: 'Manda nel cestino Gmail le email di prova e cancella prenotazioni, preventivi e analisi legati agli indirizzi di test. I dati veri non vengono toccati.',
+      confirmLabel: 'Elimina',
+      onConfirm: () => this.testLabAction('cleanup', {}, 'Pulizia in corso…',
+        d => `Eliminate ${d.trashed} email, ${d.bookings} prenotazioni e ${d.quotes} preventivi di test.`)
+    });
+  }
+
+  renderTestLab() {
+    const t = this.testLab;
+    const d = t.data;
+    const busy = !!t.busy;
+    const icon = (id) => this.testChecks[id] === 'ok' ? '✅' : (this.testChecks[id] === 'ko' ? '❌' : '⚪');
+    const card = (s) => `
+      <div class="booking-row" style="padding-right:16px;">
+        <div class="row-top">
+          <div class="name">${this.escape(s.title)}</div>
+          <button class="test-toggle" onclick="app.cycleTestCheck('${s.id}')">${icon(s.id)}</button>
+        </div>
+        ${s.name ? `<div class="rate-info">da ${this.escape(s.name)}</div>` : ''}
+        <ul class="test-checks">${s.checks.map(c => `<li>${this.escape(c)}</li>`).join('')}</ul>
+      </div>`;
+
+    let body;
+    if (!d) {
+      body = t.error
+        ? `<div class="error-banner">${this.escape(t.error)}</div>`
+        : `<div class="loading"><div class="spinner"></div>Carico il laboratorio…</div>`;
+    } else {
+      const all = [...d.scenarios, ...d.bookingScenarios];
+      const ok = all.filter(s => this.testChecks[s.id] === 'ok').length;
+      const ko = all.filter(s => this.testChecks[s.id] === 'ko').length;
+      const groupA = d.scenarios.filter(s => s.batch === 'A');
+      const groupB = d.scenarios.filter(s => s.batch === 'B');
+      const bookingTotal = d.bookingScenarios.reduce((n, s) => n + s.count, 0);
+      body = `
+        ${t.message ? `<div class="sent-confirm" style="margin:0 0 16px;">${this.escape(t.message)}</div>` : ''}
+        ${t.error ? `<div class="error-banner">${this.escape(t.error)}</div>` : ''}
+        ${!d.scopeOk ? `<div class="discrepancy-banner">Serve un permesso Gmail in più per inserire le email di prova.<button class="btn btn-primary" style="margin-top:10px;" onclick="app.reconnectGmail()">Riconnetti Gmail</button></div>` : ''}
+
+        <div class="detail-card" style="font-size:13px; line-height:1.5; color:var(--text-secondary);">
+          Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi del tipo <b>${this.escape(d.ownEmail.replace('@', '+acmetest.nome@'))}</b>: Gmail li recapita sempre a te, quindi risposte e preventivi tornano nella tua inbox e non escono verso nessun altro. Tocca il cerchio di ogni prova per segnarla ✅ o ❌.
+        </div>
+
+        <div class="detail-card" style="text-align:center;">
+          <div style="font-size:22px; font-weight:700;">${ok} ✅ &nbsp; ${ko} ❌ &nbsp; ${all.length - ok - ko} ⚪</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Presenti ora: ${d.counts.emails} email e ${d.counts.bookings} prenotazioni di test</div>
+        </div>
+
+        <div class="section-title">1 · Email di prova</div>
+        <div class="btn-row" style="margin-bottom:12px;">
+          <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'A'}, 'Inserisco le email…', r => r.inserted + ' email inserite (gruppo A). Torna alla dashboard.')">${t.busy || 'Inserisci gruppo A (' + groupA.length + ')'}</button>
+          <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'B'}, 'Inserisco le email…', r => r.inserted + ' email inserite (gruppo B). Torna alla dashboard.')">${t.busy || 'Inserisci gruppo B (' + groupB.length + ')'}</button>
+        </div>
+        <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 12px;">Due gruppi perché la dashboard legge le ultime mail della inbox: inserirle tutte insieme ne nasconderebbe alcune.</div>
+        <div class="section-title">Gruppo A — flusso prenotazione</div>
+        ${groupA.map(card).join('')}
+        <div class="section-title">Gruppo B — casi difficili</div>
+        ${groupB.map(card).join('')}
+
+        <div class="section-title">2 · Prenotazioni di test</div>
+        <button class="btn btn-send" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-bookings', {}, 'Creo le prenotazioni…', r => r.inserted + ' prenotazioni di test create.')">${t.busy || 'Crea ' + bookingTotal + ' prenotazioni di test'}</button>
+        ${d.bookingScenarios.map(card).join('')}
+
+        <div class="section-title">Pulizia</div>
+        <button class="btn btn-reject" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">🗑️ Elimina tutti i dati di test</button>
+        <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Da fare prima di usare l'app sul serio, così statistiche e promemoria partono puliti.</div>`;
+    }
+
+    return `
+      <div class="list-header">
+        <div class="back" onclick="app.goBack()">‹ ACME</div>
+      </div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Laboratorio di test</h1></div>
+      ${body}`;
   }
 
   openReminders() {
@@ -1021,7 +1177,7 @@ class ACME {
     const email = this.selectedEmail;
     const respItem = email.responses[idx];
     const resp = (respItem && typeof respItem === 'object') ? respItem.text : respItem;
-    const to = (email.from.match(/[\w.-]+@[\w.-]+\.\w+/) || [])[0] || '';
+    const to = (email.from.match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || '';
     const subject = 'RE: ' + email.subject;
     this.sendingIdx = idx;
     this.error = null;
@@ -1107,7 +1263,7 @@ class ACME {
   }
 
   extractEmailAddress(fromStr) {
-    return (fromStr.match(/[\w.-]+@[\w.-]+\.\w+/) || [])[0] || '';
+    return (fromStr.match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || '';
   }
 
   extractGuestName(fromStr) {
@@ -1313,10 +1469,14 @@ class ACME {
   // la stessa stanza appena liberata).
   async notifyCleaningLady(booking) {
     try {
+      // Prenotazioni di test (indirizzo +acmetest): la mail NON va alla colf vera,
+      // ma alla tua casella, così vedi cosa riceverebbe senza disturbare nessuno.
+      const isTest = (booking.guest_email || '').includes('+acmetest');
       const settingsRes = await fetch('/api/auth?action=get-cleaner-email');
       const settingsData = await settingsRes.json().catch(() => ({}));
       const cleanerEmail = settingsData.cleanerEmail;
-      if (!cleanerEmail) return;
+      if (!cleanerEmail && !isTest) return;
+      const recipient = isTest ? booking.guest_email.replace(/\+[^@]*@/, '@') : cleanerEmail;
 
       const nextRes = await fetch('/api/booking?nextCheckinAfter=' + encodeURIComponent(booking.check_out));
       const nextData = await nextRes.json().catch(() => ({}));
@@ -1340,7 +1500,11 @@ class ACME {
       await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: cleanerEmail, subject: 'Domus 106 — check-out completato', body })
+        body: JSON.stringify({
+          to: recipient,
+          subject: (isTest ? '[TEST] ' : '') + 'Domus 106 — check-out completato',
+          body: isTest ? `(Simulazione: questa mail sarebbe andata a ${cleanerEmail || 'la persona delle pulizie'})\n\n${body}` : body
+        })
       });
 
       // Segna che la mail è partita: da qui in poi compare il promemoria
@@ -1928,6 +2092,7 @@ Domus 106`;
     else if (this.view === 'statistics') { this.view = 'dashboard'; }
     else if (this.view === 'statisticsMonth') { this.view = 'statistics'; this.selectedStatsMonth = null; }
     else if (this.view === 'reminders') { this.view = 'dashboard'; }
+    else if (this.view === 'testLab') { this.view = 'dashboard'; }
     else if (this.view === 'bookingDetail') { this.view = this.bookingDetailOrigin || 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
@@ -2165,6 +2330,11 @@ Domus 106`;
           <span class="settings-label">Email colf/pulizie</span>
           <span class="settings-chevron">›</span>
         </div>
+        <div class="settings-row" onclick="app.openTestLab()">
+          <span class="settings-icon">🧪</span>
+          <span class="settings-label">Laboratorio di test</span>
+          <span class="settings-chevron">›</span>
+        </div>
       </div>`;
   }
 
@@ -2183,7 +2353,7 @@ Domus 106`;
           </div>
           <div class="subject">${this.escape(e.subject)}</div>
           <div class="preview">${this.escape(e.body)}</div>
-          <div class="ready-badge">● Risposte pronte</div>
+          <div class="ready-badge">● Risposte pronte</div>${e.from.includes('+acmetest') ? ' <span class="chip chip-code" style="margin-left:6px;">🧪 test</span>' : ''}
         </div>`;
     }).join('')
       : `<div class="empty">Nessuna email qui — persino Willy il Coyote ogni tanto si ferma a riprendere fiato</div>`;
@@ -2451,6 +2621,7 @@ Domus 106`;
             <span class="chip ${statusClass}">${this.escape(status)}</span>
             <span class="chip ${paymentClass}">${paymentLabel}</span>
             ${b.guests ? `<span class="chip chip-guests">👤 ${b.guests}</span>` : ''}
+            ${(b.guest_email || '').includes('+acmetest') ? '<span class="chip chip-code">🧪 test</span>' : ''}
             <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
           </div>
         </div>`;
@@ -2652,6 +2823,7 @@ Domus 106`;
     else if (this.view === 'statistics') el.innerHTML = this.renderStatistics();
     else if (this.view === 'statisticsMonth') el.innerHTML = this.renderStatisticsMonth();
     else if (this.view === 'reminders') el.innerHTML = this.renderReminders();
+    else if (this.view === 'testLab') el.innerHTML = this.renderTestLab();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     this.updateAppBadge();
   }
