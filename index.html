@@ -38,6 +38,12 @@
   .topbar .eyebrow { font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 2px; }
   .topbar h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
 
+  .test-auto { font-size: 12px; margin-top: 6px; line-height: 1.4; }
+  .test-auto.ok { color: var(--green); }
+  .test-auto.ko { color: var(--red); }
+  .test-note { font-size: 12.5px; margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 8px; cursor: pointer; line-height: 1.4; }
+  .report-box { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; white-space: pre; min-height: 220px; }
+  details.test-details summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 6px 0; }
   .test-toggle {
     width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--bg);
     font-size: 16px; cursor: pointer; flex-shrink: 0; padding: 0;
@@ -463,6 +469,56 @@ const BOOKING_STATUSES = ['confermata', 'in arrivo', 'conclusa', 'cancellata'];
 
 const VAPID_PUBLIC_KEY = "BAUiDQRLOp24qASDBM3nbZp39PPaZdfaCSC0Fcx9u79ervwtSp7apDxmMo_aV-V-4qVXOH7wB4ck598mmBgJcSU";
 
+// ---------- scatola nera ----------
+// Registra, durante l'uso normale, richieste fallite, lente o errori JavaScript.
+// Salva solo percorso, esito e durata (mai contenuti, chiavi o indirizzi).
+// Gli errori finiscono nel Laboratorio di test, che li mette nel report.
+const REQ_RING = [];
+function safePath(u) {
+  try {
+    const url = new URL(u, location.origin);
+    const a = url.searchParams.get('action');
+    return url.pathname + (a ? '?action=' + a : '');
+  } catch (e) { return String(u).slice(0, 60); }
+}
+function bufferError(err) {
+  try {
+    const b = JSON.parse(localStorage.getItem('acme_err_buffer') || '[]');
+    b.push({ at: new Date().toISOString(), view: window.__acme ? window.__acme.view : null, ...err });
+    localStorage.setItem('acme_err_buffer', JSON.stringify(b.slice(-50)));
+  } catch (e) {}
+}
+const _nativeFetch = window.fetch.bind(window);
+window.fetch = async function (input, init) {
+  const url = typeof input === 'string' ? input : ((input && input.url) || '');
+  const path = safePath(url);
+  const method = (init && init.method) || 'GET';
+  const t0 = Date.now();
+  try {
+    const res = await _nativeFetch(input, init);
+    const ms = Date.now() - t0;
+    REQ_RING.push({ at: new Date().toISOString(), method, path, status: res.status, ms });
+    if (REQ_RING.length > 20) REQ_RING.shift();
+    if (path.startsWith('/api/') && (res.status >= 500 || ms > 8000)) {
+      bufferError({ kind: res.status >= 500 ? 'http' : 'lento', path, status: res.status, ms });
+    }
+    return res;
+  } catch (e) {
+    const ms = Date.now() - t0;
+    REQ_RING.push({ at: new Date().toISOString(), method, path, status: 0, ms });
+    if (REQ_RING.length > 20) REQ_RING.shift();
+    if (path.startsWith('/api/')) bufferError({ kind: 'rete', path, message: e.message, ms });
+    throw e;
+  }
+};
+window.addEventListener('error', (ev) => {
+  bufferError({ kind: 'js', message: String(ev.message || '').slice(0, 160), where: ((ev.filename || '').split('/').pop() || '') + ':' + (ev.lineno || '') });
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  const r = ev.reason;
+  bufferError({ kind: 'promessa', message: String((r && r.message) || r || '').slice(0, 160) });
+});
+
 class ACME {
   constructor() {
     this.view = 'init';
@@ -492,7 +548,11 @@ class ACME {
     this.selectedStatsMonth = null;
     this.reminders = { cleanerPending: [], paymentPending: [] };
     this.testLab = { data: null, loading: false, busy: null, message: null, error: null };
-    this.testChecks = JSON.parse(localStorage.getItem('acme_test_checks') || '{}');
+    this.testSession = null;
+    this.testReport = null;
+    this.testHistory = null;
+    this.testHistoryCount = 0;
+    this.viewTrail = [];
   }
 
   emptyQuoteState() {
@@ -685,12 +745,17 @@ class ACME {
   }
 
   // ---------- Laboratorio di test ----------
+  isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  }
+
   async openTestLab() {
     this.view = 'testLab';
     this.testLab.message = null;
     this.testLab.error = null;
     this.render();
-    await this.loadTestLab();
+    await Promise.all([this.loadTestLab(), this.loadTestSession()]);
+    this.render();
   }
 
   async loadTestLab() {
@@ -708,6 +773,74 @@ class ACME {
     this.render();
   }
 
+  // Il registro delle prove vive su Supabase: resta per giorni e da qualunque telefono
+  async loadTestSession() {
+    try {
+      const res = await fetch('/api/test-lab?action=log-get');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Registro non leggibile');
+      this.testSession = data.session;
+      this.testHistoryCount = data.historyCount || 0;
+      // Migrazione una tantum dei vecchi segni salvati solo sul telefono
+      const old = JSON.parse(localStorage.getItem('acme_test_checks') || 'null');
+      if (old) {
+        Object.entries(old).forEach(([id, st]) => {
+          if (st && !this.testSession.results[id]) this.testSession.results[id] = { state: st, note: '', at: new Date().toISOString() };
+        });
+        localStorage.removeItem('acme_test_checks');
+      }
+      await this.flushErrorBuffer();
+    } catch (e) {
+      this.testLab.error = e.message;
+    }
+  }
+
+  async saveTestSession() {
+    if (!this.testSession) return;
+    try {
+      await fetch('/api/test-lab?action=log-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: this.testSession })
+      });
+    } catch (e) {}
+  }
+
+  describeAppError(err) {
+    if (err.kind === 'http') return `Errore del server ${err.status} su ${err.path}`;
+    if (err.kind === 'lento') return `Risposta molto lenta (${Math.round((err.ms || 0) / 1000)} s) su ${err.path}`;
+    if (err.kind === 'rete') return `Richiesta fallita su ${err.path}: ${err.message || 'rete'}`;
+    if (err.kind === 'js') return `Errore JavaScript: ${err.message}`;
+    return `Errore non gestito: ${err.message}`;
+  }
+
+  // Gli errori raccolti dalla scatola nera durante l'uso normale entrano nel registro
+  async flushErrorBuffer() {
+    if (!this.testSession) return;
+    let buf = [];
+    try { buf = JSON.parse(localStorage.getItem('acme_err_buffer') || '[]'); } catch (e) {}
+    if (!buf.length) return;
+    const list = this.testSession.findings;
+    buf.forEach(err => {
+      const what = err.path || (err.message || '').slice(0, 60);
+      const key = `app:${err.kind}:${what}`;
+      const ex = list.find(f => f.key === key);
+      if (ex) {
+        ex.count = (ex.count || 1) + 1;
+        ex.lastAt = err.at;
+      } else {
+        list.push({
+          key, source: 'app', severity: err.kind === 'lento' ? 'avviso' : 'errore',
+          title: this.describeAppError(err),
+          detail: `Schermata: ${err.view || '?'}${err.ms ? ' · durata ' + err.ms + ' ms' : ''}${err.where ? ' · ' + err.where : ''}`,
+          count: 1, firstAt: err.at, lastAt: err.at, context: { view: err.view || null }
+        });
+      }
+    });
+    localStorage.removeItem('acme_err_buffer');
+    await this.saveTestSession();
+  }
+
   async testLabAction(action, body, busyLabel, doneMsg) {
     const t = this.testLab;
     t.busy = busyLabel;
@@ -722,8 +855,19 @@ class ACME {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || data.error || 'Operazione fallita');
-      t.message = doneMsg(data);
-      if (action === 'seed-emails' || action === 'cleanup') await this.refreshInboxQuiet();
+      const s = this.testSession;
+      if (s) {
+        if (action === 'seed-emails') (data.scenarioIds || []).forEach(id => { s.seeded[id] = new Date().toISOString(); });
+        if (action === 'seed-bookings') s.bookingsSeeded = true;
+        if (action === 'cleanup') {
+          s.seeded = {}; s.bookingsSeeded = false; s.autoResults = [];
+          s.findings = s.findings.filter(f => f.source !== 'auto');
+        }
+        await this.saveTestSession();
+      }
+      let inbox = null;
+      if (action === 'seed-emails' || action === 'cleanup') inbox = await this.refreshInboxQuiet();
+      t.message = doneMsg(data, inbox);
       this.bookings = [];
       await this.loadReminders();
     } catch (e) {
@@ -734,29 +878,517 @@ class ACME {
   }
 
   // Aggiorna la dashboard senza cambiare schermata (analizza con Claude le mail nuove)
+  // e riporta com'è andata, invece di ignorare i problemi in silenzio.
   async refreshInboxQuiet() {
+    const out = { ok: false, error: null, seen: 0 };
     try {
       const res = await fetch('/api/emails-analyzed', {
         headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        out.error = (res.status === 504 || res.status === 502)
+          ? 'Vercel ha interrotto l\'analisi perché ci metteva troppo (limite di 10 secondi). Aspetta 5 minuti (le analizza il controllo automatico) e premi ↻ in dashboard, oppure inserisci meno email alla volta.'
+          : (j.error || ('errore ' + res.status));
+        return out;
+      }
       const data = await res.json();
       this.byCategory = data.byCategory || {};
       this.lastUpdated = new Date();
-    } catch (e) {}
+      out.ok = true;
+      out.seen = Object.values(this.byCategory).flat().filter(e => (e.from || '').includes('+acmetest')).length;
+    } catch (e) {
+      out.error = e.message;
+    }
+    return out;
+  }
+
+  seedMessage(r, ib) {
+    let msg = `${r.inserted} email inserite in Gmail (${r.inTop8} tra le 8 più recenti, quelle che la dashboard legge). `;
+    msg += ib.ok ? `Dashboard aggiornata: ne mostra ${ib.seen}.` : `⚠️ La dashboard non si è aggiornata: ${ib.error}`;
+    if (r.inTop8NoMe < r.inTop8) msg += ' ⚠️ Per il controllo automatico Gmail le considera «da te»: le push urgenti non partiranno per queste mail di prova.';
+    return msg;
+  }
+
+  // Esito effettivo di una prova: ❌ se l'hai segnata tu OPPURE se un controllo automatico l'ha bocciata
+  testEffective(id) {
+    const s = this.testSession;
+    if (!s) return '';
+    const manual = (s.results[id] || {}).state || '';
+    const autoFail = (s.autoResults || []).some(a => a.scenarioId === id && !a.ok && a.severity === 'errore');
+    if (manual === 'ko' || autoFail) return 'ko';
+    return manual === 'ok' ? 'ok' : '';
   }
 
   cycleTestCheck(id) {
-    const next = { '': 'ok', 'ok': 'ko', 'ko': '' };
-    this.testChecks[id] = next[this.testChecks[id] || ''];
-    localStorage.setItem('acme_test_checks', JSON.stringify(this.testChecks));
+    const s = this.testSession;
+    if (!s) return;
+    const cur = s.results[id] || { state: '', note: '' };
+    const next = { '': 'ok', 'ok': 'ko', 'ko': '' }[cur.state || ''];
+    let note = next === '' ? '' : (cur.note || '');
+    if (next === 'ko') {
+      const typed = window.prompt('Cosa non ha funzionato? (facoltativo, ma aiuta a correggerlo)', note);
+      if (typed !== null) note = typed.trim();
+    }
+    s.results[id] = { state: next, note, at: new Date().toISOString() };
+    this.saveTestSession();
     this.render();
+  }
+
+  editTestNote(id) {
+    const s = this.testSession;
+    if (!s || !s.results[id]) return;
+    const typed = window.prompt('Nota su questa prova:', s.results[id].note || '');
+    if (typed === null) return;
+    s.results[id].note = typed.trim();
+    this.saveTestSession();
+    this.render();
+  }
+
+  // Segnalazione libera di un problema, da qualunque punto dell'app (Impostazioni → Segnala un problema)
+  async reportProblem() {
+    if (!this.testSession) await this.loadTestSession();
+    const s = this.testSession;
+    if (!s) return;
+    const text = window.prompt('Descrivi il problema: cosa stavi facendo e cosa è andato storto?', '');
+    if (!text || !text.trim()) return;
+    const now = new Date().toISOString();
+    s.findings.push({
+      key: 'man:' + Date.now(), source: 'manuale', severity: 'errore',
+      title: text.trim().slice(0, 90), detail: text.trim(), count: 1, firstAt: now, lastAt: now,
+      context: { view: this.view, trail: this.viewTrail.slice(-6), requests: REQ_RING.slice(-8) }
+    });
+    await this.saveTestSession();
+    this.testLab.message = 'Problema registrato: finirà nel report della sessione.';
+    this.render();
+  }
+
+  removeFinding(encKey) {
+    const key = decodeURIComponent(encKey);
+    this.testSession.findings = this.testSession.findings.filter(f => f.key !== key);
+    this.saveTestSession();
+    this.render();
+  }
+
+  // ---------- controlli automatici ----------
+  async runAutoChecks() {
+    const t = this.testLab, s = this.testSession, d = t.data;
+    if (!s || !d) return;
+    t.busy = 'Controlli in corso…';
+    t.message = null;
+    t.error = null;
+    this.render();
+
+    const results = [];
+    const check = (key, group, title, ok, detail, severity, scenarioId) =>
+      results.push({ key, group, title, ok: !!ok, detail: detail || '', severity: severity || 'errore', scenarioId: scenarioId || null });
+    const J = { 'Content-Type': 'application/json' };
+    const call = async (url, opts) => {
+      const r = await fetch(url, opts);
+      const j = await r.json().catch(() => ({}));
+      return { r, j };
+    };
+    const iso = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+    const testMail = d.ownEmail.replace('@', '+acmetest.autotest@');
+    let rm = null, nr = null;
+
+    try {
+      // 1) Sistema (server): variabili, tabelle e colonne, token, dispositivi push
+      try {
+        const { r, j } = await call('/api/test-lab?action=diag');
+        if (!r.ok) throw new Error(j.message || j.error || 'HTTP ' + r.status);
+        (j.checks || []).forEach(c => check(c.key, c.group, c.title, c.ok, c.detail, c.severity));
+      } catch (e) { check('diag', 'Sistema', 'Diagnostica del server', false, e.message); }
+
+      // 2) Questo telefono
+      check('dev:claude', 'Sistema', 'Chiave Claude salvata su questo telefono', !!localStorage.getItem('claude_api_key'), 'Reinseriscila da Impostazioni → Cambia chiave API');
+      check('dev:push', 'Sistema', 'Notifiche push attive su questo iPhone', this.pushEnabled, 'Attivale da Impostazioni', 'avviso');
+      check('dev:pwa', 'Sistema', 'App aperta dalla schermata Home', this.isStandalone(), 'Aperta da Safari: Calendario e push possono comportarsi in modo diverso', 'avviso');
+
+      // 3) Logica di calcolo (senza rete)
+      const T = (key, title, got, want) => check(key, 'Logica', title, JSON.stringify(got) === JSON.stringify(want), `ottenuto ${JSON.stringify(got)}, atteso ${JSON.stringify(want)}`);
+      const ago = (h) => new Date(Date.now() - h * 3600000).toISOString();
+      T('lg:h25', 'Check-out 11:00 → check-in 12:00 del giorno dopo = 25 ore', this.hoursUntilNextCheckin('2026-10-01', '2026-10-02'), 25);
+      T('lg:f25', 'Formato countdown: 25 ore', this.formatHoursCountdown(25), 'mancano 25 ore');
+      T('lg:f1', 'Formato countdown: 1 ora', this.formatHoursCountdown(1), 'mancano 1 ora');
+      T('lg:f50', 'Formato countdown: 50 ore', this.formatHoursCountdown(50), 'mancano 2 giorni e 2 ore');
+      T('lg:f48', 'Formato countdown: 48 ore', this.formatHoursCountdown(48), 'mancano 2 giorni');
+      T('lg:lock72', 'Blocco a 48 ore: chiusa da 72 ore → bloccata', this.isBookingLocked({ concluded_at: ago(72) }), true);
+      T('lg:lock2', 'Blocco a 48 ore: chiusa da 2 ore → ripristinabile', this.isBookingLocked({ concluded_at: ago(2) }), false);
+      T('lg:lockNone', 'Senza data di chiusura non si blocca', this.isBookingLocked({}), false);
+      T('lg:nights', 'Notti tra 1 e 6 ottobre', this.computeNightsPreview('2026-10-01', '2026-10-06'), 5);
+      let threw = false;
+      try { this.computeNightsPreview('2026-10-06', '2026-10-01'); } catch (e) { threw = true; }
+      T('lg:nightsBad', 'Date invertite: segnala errore', threw, true);
+      T('lg:rateHigh', 'Tariffa suggerita in alta stagione (luglio)', this.suggestRatePreview('2026-07-10'), 150);
+      T('lg:rateLow', 'Tariffa suggerita in bassa stagione (novembre)', this.suggestRatePreview('2026-11-10'), 80);
+      T('lg:plus', 'Indirizzo con «+» letto per intero', this.extractEmailAddress('Marco <mario+acmetest.marco@gmail.com>'), 'mario+acmetest.marco@gmail.com');
+      T('lg:name', 'Nome ospite tra virgolette', this.extractGuestName('"Marco Bianchi" <m@x.it>'), 'Marco Bianchi');
+
+      // 4) Flussi dati: scrive, rilegge e cancella una prenotazione e un preventivo di prova
+      let created = null;
+      try {
+        const c = await call('/api/booking', { method: 'POST', headers: J, body: JSON.stringify({ guestName: 'TEST · autotest', guestEmail: testMail, checkIn: iso(200), checkOut: iso(203), total: 300, notes: 'autotest', guests: 3, paymentStatus: 'acconto versato', ratePerNight: 100, discountPercent: 0 }) });
+        created = c.r.ok ? c.j.booking : null;
+        check('rt:create', 'Flussi dati', 'Salvataggio di una prenotazione con codice', c.r.ok && created && /^D106-\d{4}-[A-Z2-9]{4}$/.test(created.code || ''), c.r.ok ? `codice ${created && created.code}` : (c.j.error || 'HTTP ' + c.r.status));
+        if (created) {
+          const p = await call('/api/booking', { method: 'PATCH', headers: J, body: JSON.stringify({ id: created.id, notes: 'autotest2', status: 'conclusa', paymentStatus: 'saldata', checkoutReviewed: true, concludedAt: new Date().toISOString(), cleanerNotified: true, cleanerConfirmed: false }) });
+          const pb = p.j.booking || {};
+          check('rt:patch', 'Flussi dati', 'Modifica di stato, pagamento e pulizie (tutte le colonne)', p.r.ok && pb.status === 'conclusa' && pb.payment_status === 'saldata' && pb.cleaner_notified === true && !!pb.concluded_at, p.r.ok ? 'un campo non ha salvato il valore' : (p.j.error || 'HTTP ' + p.r.status));
+          const g = await call('/api/booking?code=' + encodeURIComponent(created.code));
+          const gb = (g.j.bookings || [])[0] || {};
+          check('rt:get', 'Flussi dati', 'Lettura per codice, con ospiti e tariffa', g.r.ok && gb.guests === 3 && Number(gb.rate_per_night) === 100, `ospiti=${gb.guests}, tariffa=${gb.rate_per_night}`);
+          const ir = await fetch('/api/booking?' + new URLSearchParams({ ics: '1', guestName: 'TEST · autotest', checkIn: iso(200), checkOut: iso(203), paymentStatus: 'da saldare', code: created.code }));
+          const it = await ir.text();
+          check('rt:ics', 'Flussi dati', 'Evento Calendario (.ics) con stato di pagamento', ir.ok && (ir.headers.get('content-type') || '').includes('text/calendar') && it.includes('BEGIN:VEVENT') && it.includes('DA SALDARE'), ir.ok ? 'contenuto inatteso' : 'HTTP ' + ir.status);
+        }
+      } catch (e) {
+        check('rt:create', 'Flussi dati', 'Salvataggio di una prenotazione con codice', false, e.message);
+      } finally {
+        if (created) await fetch('/api/booking', { method: 'DELETE', headers: J, body: JSON.stringify({ id: created.id }) }).catch(() => {});
+      }
+
+      try {
+        const sv = await call('/api/booking', { method: 'POST', headers: J, body: JSON.stringify({ savePendingQuote: true, guestEmail: testMail, guestName: 'TEST · autotest', checkIn: iso(200), checkOut: iso(203), ratePerNight: 100, discountPercent: 5, guests: 2, total: 285 }) });
+        const rd = await call('/api/booking?pendingQuoteEmail=' + encodeURIComponent(testMail));
+        const pq = rd.j.pendingQuote;
+        check('rt:pq', 'Flussi dati', 'Preventivo in sospeso: salva e rilegge (indirizzo con «+»)', sv.r.ok && pq && Number(pq.rate_per_night) === 100 && Number(pq.discount_percent) === 5, sv.r.ok ? 'riletto: ' + JSON.stringify(pq) : (sv.j.error || 'HTTP ' + sv.r.status));
+        await fetch('/api/booking', { method: 'DELETE', headers: J, body: JSON.stringify({ deletePendingQuoteEmail: testMail }) });
+        const rd2 = await call('/api/booking?pendingQuoteEmail=' + encodeURIComponent(testMail));
+        check('rt:pqdel', 'Flussi dati', 'Preventivo in sospeso: si cancella alla conferma', rd2.r.ok && rd2.j.pendingQuote === null, JSON.stringify(rd2.j.pendingQuote));
+      } catch (e) {
+        check('rt:pq', 'Flussi dati', 'Preventivo in sospeso', false, e.message);
+      }
+
+      rm = await call('/api/booking?reminders=1');
+      check('api:reminders', 'Flussi dati', 'Promemoria operativi (pulizie e pagamenti)', rm.r.ok && Array.isArray(rm.j.cleanerPending) && Array.isArray(rm.j.paymentPending), rm.j.error || 'HTTP ' + rm.r.status);
+      const nx = await call('/api/booking?nextCheckinAfter=' + todayIso);
+      check('api:next', 'Flussi dati', 'Ricerca della prossima prenotazione', nx.r.ok && 'nextBooking' in nx.j, nx.j.error || 'HTTP ' + nx.r.status);
+      nr = await call('/api/booking?needsReview=true');
+      check('api:review', 'Flussi dati', 'Prenotazioni da rivedere al check-out', nr.r.ok && Array.isArray(nr.j.bookings), nr.j.error || 'HTTP ' + nr.r.status);
+      const ce = await call('/api/auth?action=get-cleaner-email');
+      check('api:cleaner', 'Flussi dati', 'Lettura email della persona delle pulizie', ce.r.ok, ce.j.error || 'HTTP ' + ce.r.status);
+
+      // 5) Posta: raggiungibilità e tempo di analisi (il limite di Vercel è 10 secondi)
+      if (localStorage.getItem('claude_api_key')) {
+        const t0 = Date.now();
+        const ib = await this.refreshInboxQuiet();
+        const ms = Date.now() - t0;
+        check('api:inbox', 'Posta', 'Lettura e analisi della posta', ib.ok, ib.ok ? `${ms} ms` : ib.error);
+        if (ib.ok) check('api:inboxms', 'Posta', 'Analisi sotto gli 8 secondi (il limite di Vercel è 10)', ms < 8000, `${ms} ms`, 'avviso');
+      }
+
+      // 6) Email di prova inserite: categoria, tono, corpo leggibile, contenuto delle risposte
+      const allMails = Object.values(this.byCategory || {}).flat();
+      const norm = (r) => (r && typeof r === 'object') ? (r.text || '') : (r || '');
+      for (const sc of d.scenarios) {
+        if (!s.seeded[sc.id]) continue;
+        const e = allMails.find(x => (x.from || '').includes('+acmetest.' + sc.tag) && (x.subject || '').startsWith(sc.subjectPrefix || ''));
+        if (!e) {
+          check('cls:' + sc.id, 'Email', sc.title, false, 'Inserita ma non compare tra le mail analizzate (limite delle 8 mail più recenti, timeout o errore di analisi)', 'errore', sc.id);
+          continue;
+        }
+        const ex = sc.expect || {};
+        const problems = [];
+        if (e.analysisError) problems.push('analisi Claude fallita');
+        if (ex.categories && !ex.categories.includes(e.category)) problems.push(`categoria «${e.category}», attesa ${ex.categories.map(c => '«' + c + '»').join(' o ')}`);
+        if (ex.tones && !ex.tones.includes(e.tone)) problems.push(`tono «${e.tone}», atteso ${ex.tones.map(c => '«' + c + '»').join(' o ')}`);
+        if (ex.discrepancy && !e.discrepancy) problems.push('nessuna incongruenza segnalata');
+        if (ex.bodyNotEmpty && (!e.body || e.body === '(No body)')) problems.push('corpo della mail illeggibile «(No body)»');
+        check('cls:' + sc.id, 'Email', sc.title, problems.length === 0, problems.length ? problems.join(' · ') : `${e.category} · ${e.tone}`, 'errore', sc.id);
+        const texts = (e.responses || []).map(norm).filter(Boolean);
+        (sc.responseChecks || []).forEach((rc, i) => {
+          if (!texts.length) return;
+          let bad, why = '';
+          if (rc.mustMatchAny) {
+            const re = new RegExp(rc.mustMatchAny, rc.flags || '');
+            bad = !texts.some(x => re.test(x));
+            if (bad) why = `nessuna delle ${texts.length} risposte lo contiene`;
+          } else {
+            const re = new RegExp(rc.mustNotMatch, rc.flags || '');
+            const hit = texts.map(x => x.match(re)).find(Boolean);
+            bad = !!hit;
+            if (bad) why = `trovato nella risposta: «…${hit.input.slice(Math.max(0, hit.index - 30), hit.index + hit[0].length + 30).replace(/\s+/g, ' ')}…»`;
+          }
+          check(`resp:${sc.id}:${i}`, 'Risposte', `${sc.title}: ${rc.label}`, !bad, why, rc.severity, sc.id);
+        });
+      }
+
+      // 7) Prenotazioni di prova
+      if (s.bookingsSeeded) {
+        const all = await call('/api/booking');
+        const rows = all.j.bookings || [];
+        const named = (n) => rows.find(b => b.guest_name === 'TEST · ' + n);
+        const H48 = 48 * 3600000;
+
+        const oggiRow = named('Check-out oggi');
+        const oggi = ((nr && nr.j.bookings) || []).find(b => b.guest_name === 'TEST · Check-out oggi');
+        check('bk:oggi', 'Prenotazioni', 'Check-out di oggi → compare tra quelle da rivedere', !!oggi || (oggiRow && oggiRow.status === 'conclusa'), 'Non compare: il pop-up «Com\'è andato il soggiorno?» non partirebbe', 'errore', 'b-oggi');
+
+        const domRow = named('Arrivo domani');
+        const dom = ((rm && rm.j.paymentPending) || []).find(b => b.guest_name === 'TEST · Arrivo domani');
+        check('bk:domani', 'Prenotazioni', 'Arrivo imminente da saldare → tra i pagamenti da sollecitare', !!dom || (domRow && domRow.payment_status !== 'da saldare'), 'Non compare nei promemoria pagamenti', 'errore', 'b-domani');
+
+        const nove = named('Arrivo tra 9 giorni');
+        check('bk:nove', 'Prenotazioni', 'Acconto, 4 ospiti e tariffa salvati correttamente', nove && nove.payment_status === 'acconto versato' && nove.guests === 4 && Number(nove.rate_per_night) === 90, nove ? `pagamento=${nove.payment_status}, ospiti=${nove.guests}, tariffa=${nove.rate_per_night}` : 'prenotazione non trovata', 'errore', 'b-nove');
+
+        const due = named('Chiusa da 2 ore');
+        const dueAge = due && due.concluded_at ? Date.now() - new Date(due.concluded_at).getTime() : 0;
+        check('bk:duore', 'Prenotazioni', 'Chiusa da poco → ancora ripristinabile', due && (dueAge > H48 || !this.isBookingLocked(due)), due ? `chiusa il ${due.concluded_at}` : 'prenotazione non trovata', 'errore', 'b-duore');
+
+        const tre = named('Chiusa da 3 giorni');
+        const treRem = ((rm && rm.j.cleanerPending) || []).find(b => b.guest_name === 'TEST · Chiusa da 3 giorni');
+        check('bk:tre', 'Prenotazioni', 'Chiusa da 3 giorni → bloccata, con promemoria pulizie e prossimo arrivo', tre && this.isBookingLocked(tre) && (!!treRem ? !!treRem.next_check_in : tre.cleaner_confirmed === true), tre ? `bloccata=${this.isBookingLocked(tre)}, promemoria=${!!treRem}, prossimo arrivo=${treRem ? treRem.next_check_in : '—'}` : 'prenotazione non trovata', 'errore', 'b-tregiorni');
+
+        const el = named('Elena Greco');
+        let hist = [];
+        if (el) { const h = await call('/api/booking?guestEmail=' + encodeURIComponent(el.guest_email)); hist = h.j.bookings || []; }
+        check('bk:elena', 'Prenotazioni', 'Storico ospite: la nota del soggiorno passato riemerge', hist.some(b => (b.notes || '').includes('Rumorosi')), 'Lo storico non restituisce la nota', 'errore', 'b-elena');
+
+        const prev = this.bookings;
+        this.bookings = rows;
+        const ms = this.computeMonthlyStats();
+        this.bookings = prev;
+        const months = Object.values(ms);
+        check('bk:stat', 'Prenotazioni', 'Statistiche: incasso e soggiorni con note', months.some(m => m.revenue > 0) && months.some(m => m.problemStays >= 1), `mesi calcolati: ${months.length}`, 'errore', 'b-stat');
+      }
+    } catch (e) {
+      check('autotest', 'Sistema', 'Esecuzione dei controlli', false, e.message);
+    }
+
+    // I controlli falliti diventano segnalazioni; quelli superati fanno sparire la segnalazione precedente
+    const at = new Date().toISOString();
+    s.autoResults = results;
+    s.autoRunAt = at;
+    s.findings = s.findings.filter(f => f.source !== 'auto').concat(
+      results.filter(r => !r.ok).map(r => ({
+        key: 'auto:' + r.key, source: 'auto', severity: r.severity, title: r.title, detail: r.detail,
+        scenarioId: r.scenarioId, group: r.group, count: 1, firstAt: at, lastAt: at
+      }))
+    );
+    await this.saveTestSession();
+    const fails = results.filter(r => !r.ok);
+    t.message = `Controlli completati: ${results.length - fails.length}/${results.length} superati` + (fails.length ? `, ${fails.length} da guardare.` : '.');
+    t.busy = null;
+    this.render();
+  }
+
+  // ---------- problemi e report ----------
+  collectIssues() {
+    const s = this.testSession, d = this.testLab.data;
+    const byId = {};
+    (d ? [...d.scenarios, ...d.bookingScenarios] : []).forEach(x => { byId[x.id] = x; });
+    const issues = [];
+    const manualByScenario = {};
+    Object.entries(s.results).forEach(([id, r]) => {
+      if (r.state !== 'ko') return;
+      const it = { sev: 'errore', origin: 'segnalato a mano', title: byId[id] ? byId[id].title : id, scenario: byId[id] || null, note: r.note || '', details: [] };
+      issues.push(it);
+      manualByScenario[id] = it;
+    });
+    s.findings.forEach(f => {
+      if (f.source === 'auto' && f.scenarioId && manualByScenario[f.scenarioId]) {
+        const it = manualByScenario[f.scenarioId];
+        it.details.push(`${f.title}: ${f.detail}`);
+        it.origin = 'segnalato a mano + rilevato dal controllo automatico';
+        return;
+      }
+      issues.push({
+        sev: f.severity,
+        origin: f.source === 'auto' ? 'rilevato dal controllo automatico' : (f.source === 'app' ? 'errore rilevato durante l\'uso' : 'segnalato a mano'),
+        title: f.title, detail: f.detail, scenario: f.scenarioId ? (byId[f.scenarioId] || null) : null,
+        count: f.count, lastAt: f.lastAt, context: f.context, key: f.key, removable: f.source !== 'auto', details: []
+      });
+    });
+    issues.sort((a, b) => (a.sev === 'errore' ? 0 : 1) - (b.sev === 'errore' ? 0 : 1));
+    return issues;
+  }
+
+  testSummary() {
+    const d = this.testLab.data;
+    const all = [...d.scenarios, ...d.bookingScenarios];
+    let ok = 0, ko = 0, todo = 0;
+    all.forEach(x => { const e = this.testEffective(x.id); if (e === 'ok') ok++; else if (e === 'ko') ko++; else todo++; });
+    const issues = this.collectIssues();
+    return { ok, ko, todo, errors: issues.filter(i => i.sev === 'errore').length, warnings: issues.filter(i => i.sev !== 'errore').length };
+  }
+
+  buildTestReport() {
+    const s = this.testSession, d = this.testLab.data;
+    const fmt = (iso) => iso ? new Date(iso).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+    const sum = this.testSummary();
+    const issues = this.collectIssues();
+    const all = [...d.scenarios, ...d.bookingScenarios];
+    const days = Math.max(0, Math.round((Date.now() - new Date(s.startedAt).getTime()) / 86400000));
+    const L = [];
+    L.push('# Report Laboratorio di test — ACME Inbox Manager (Domus 106)');
+    L.push('');
+    L.push(`Generato: ${fmt(new Date().toISOString())} · Sessione iniziata: ${fmt(s.startedAt)} (${days} giorni fa)`);
+    L.push(`Dispositivo: ${(navigator.userAgent || '').slice(0, 110)}`);
+    L.push(`App aperta dalla Home: ${this.isStandalone() ? 'sì' : 'no'} · Push attive: ${this.pushEnabled ? 'sì' : 'no'}`);
+    L.push('');
+    L.push('> Nota per Claude: questo report è generato dal Laboratorio di test dell\'app. Per ogni problema trovi cosa era atteso, cosa è stato rilevato e il contesto. File del progetto: index.html, api/ (booking, auth, test-lab, check-urgent, quote, emails-analyzed, analyze-single, send-email, mark-resolved, push-subscription, callback) e lib/ (analyze-email, gmail-token, send-push, pricing, quote-pdf, fonts). Proponi la correzione indicando file e modifica; se ti serve un file che non hai, chiedimelo.');
+    L.push('');
+    L.push('## Riepilogo');
+    L.push(`- Prove: ✅ ${sum.ok} · ❌ ${sum.ko} · ⚪ ${sum.todo} da provare`);
+    L.push(`- Problemi aperti: ${sum.errors} errori, ${sum.warnings} avvisi`);
+    L.push(`- Controlli automatici: ${s.autoRunAt ? `ultima esecuzione ${fmt(s.autoRunAt)}, ${s.autoResults.filter(r => r.ok).length}/${s.autoResults.length} superati` : 'mai eseguiti'}`);
+    L.push('');
+    L.push('## Problemi da correggere');
+    if (!issues.length) L.push('Nessun problema aperto.');
+    issues.forEach((it, i) => {
+      L.push('');
+      L.push(`### ${i + 1}. [${it.sev === 'errore' ? 'ERRORE' : 'AVVISO'}] ${it.title}`);
+      L.push(`- Origine: ${it.origin}`);
+      if (it.detail) L.push(`- Rilevato: ${it.detail}`);
+      (it.details || []).forEach(x => L.push(`- Rilevato automaticamente: ${x}`));
+      if (it.note) L.push(`- Nota di Filippo: ${it.note}`);
+      if (it.scenario) {
+        L.push('- Cosa doveva succedere:');
+        it.scenario.checks.forEach(c => L.push(`  - ${c}`));
+      }
+      if (it.count > 1) L.push(`- Ripetuto ${it.count} volte, ultima il ${fmt(it.lastAt)}`);
+      if (it.context) {
+        if (it.context.view && !(it.detail || '').includes('Schermata:')) L.push(`- Schermata: ${it.context.view}`);
+        if (it.context.trail && it.context.trail.length) L.push(`- Schermate visitate poco prima: ${it.context.trail.join(' → ')}`);
+        if (it.context.requests && it.context.requests.length) {
+          L.push('- Ultime richieste prima della segnalazione:');
+          it.context.requests.forEach(q => L.push(`  - ${q.method} ${q.path} → ${q.status || 'errore di rete'} (${q.ms} ms)`));
+        }
+      }
+    });
+    L.push('');
+    L.push('## Esito di tutte le prove');
+    L.push('| Prova | Manuale | Automatico |');
+    L.push('|---|---|---|');
+    all.forEach(x => {
+      const man = (s.results[x.id] || {}).state;
+      const autos = (s.autoResults || []).filter(a => a.scenarioId === x.id);
+      L.push(`| ${x.title} | ${man === 'ok' ? '✅' : (man === 'ko' ? '❌' : '⚪')} | ${autos.length ? (autos.every(a => a.ok) ? '✅' : '❌') : '—'} |`);
+    });
+    L.push('');
+    L.push('## Controlli automatici (ultima esecuzione)');
+    if (!s.autoResults.length) L.push('Non ancora eseguiti.');
+    let grp = '';
+    s.autoResults.forEach(r => {
+      if (r.group !== grp) { grp = r.group; L.push(`**${grp}**`); }
+      L.push(`- ${r.ok ? '✅' : (r.severity === 'errore' ? '❌' : '⚠️')} ${r.title}${r.ok || !r.detail ? '' : ' — ' + r.detail}`);
+    });
+    L.push('');
+    L.push('## Ultime richieste dell\'app');
+    REQ_RING.slice(-15).forEach(q => L.push(`- ${q.at.slice(11, 19)} ${q.method} ${q.path} → ${q.status || 'errore di rete'} (${q.ms} ms)`));
+    L.push('');
+    L.push('Fine report.');
+    let text = L.join('\n');
+    // niente indirizzo personale nel report
+    const own = d.ownEmail || '';
+    if (own) {
+      const [loc, dom] = own.split('@');
+      text = text.split(loc + '+acmetest.').join('TUAMAIL+acmetest.').split(own).join('TUAMAIL@' + dom);
+    }
+    return text;
+  }
+
+  async previewTestReport() {
+    await this.flushErrorBuffer();
+    this.testReport = { text: this.buildTestReport(), closed: false };
+    this.render();
+  }
+
+  confirmCloseTestSession() {
+    this.showConfirmDialog({
+      title: 'Chiudere la sessione di test?',
+      desc: 'Genero il report e lo salvo nello storico. La sessione riparte da zero (le prove tornano ⚪); i dati di test restano finché non li elimini.',
+      confirmLabel: 'Chiudi e genera',
+      confirmColor: 'var(--accent)',
+      icon: '📄',
+      onConfirm: () => this.closeTestSession()
+    });
+  }
+
+  async closeTestSession() {
+    const t = this.testLab;
+    t.busy = 'Genero il report…';
+    this.render();
+    try {
+      await this.flushErrorBuffer();
+      const text = this.buildTestReport();
+      const summary = this.testSummary();
+      const res = await fetch('/api/test-lab?action=log-close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report: { text, summary } })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Chiusura non riuscita');
+      this.testSession = data.session;
+      this.testHistory = null;
+      this.testHistoryCount += 1;
+      this.testReport = { text, closed: true };
+      t.message = summary.errors
+        ? `Sessione chiusa: ${summary.errors} problemi nel report. Condividilo o copialo e mandalo a Claude.`
+        : 'Sessione chiusa: nessun errore. Report salvato nello storico.';
+    } catch (e) {
+      t.error = e.message;
+    }
+    t.busy = null;
+    this.render();
+  }
+
+  async shareTestReport() {
+    const text = this.testReport && this.testReport.text;
+    if (!text) return;
+    const name = `report-test-ACME-${new Date().toISOString().slice(0, 10)}.txt`;
+    const file = new File([text], name, { type: 'text/plain' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Report test ACME' });
+        return;
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+    await this.copyTestReport();
+  }
+
+  async copyTestReport() {
+    const text = this.testReport && this.testReport.text;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.testLab.message = 'Report copiato: incollalo nella chat con Claude.';
+      this.testLab.error = null;
+    } catch (e) {
+      this.testLab.error = 'Copia non riuscita: tieni premuto sul testo qui sotto, seleziona tutto e copia.';
+    }
+    this.render();
+  }
+
+  async loadTestHistory() {
+    try {
+      const res = await fetch('/api/test-lab?action=history-get');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Storico non leggibile');
+      this.testHistory = data.history || [];
+    } catch (e) {
+      this.testLab.error = e.message;
+    }
+    this.render();
+  }
+
+  openHistoryReport(i) {
+    const h = this.testHistory && this.testHistory[i];
+    if (!h) return;
+    this.testReport = { text: h.text, closed: true };
+    this.render();
+    window.scrollTo(0, 0);
   }
 
   confirmTestCleanup() {
     this.showConfirmDialog({
       title: 'Eliminare tutti i dati di test?',
-      desc: 'Manda nel cestino Gmail le email di prova e cancella prenotazioni, preventivi e analisi legati agli indirizzi di test. I dati veri non vengono toccati.',
+      desc: 'Manda nel cestino Gmail le email di prova e cancella prenotazioni, preventivi e analisi legati agli indirizzi di test. I dati veri non vengono toccati. Il registro delle prove resta.',
       confirmLabel: 'Elimina',
       onConfirm: () => this.testLabAction('cleanup', {}, 'Pulizia in corso…',
         d => `Eliminate ${d.trashed} email, ${d.bookings} prenotazioni e ${d.quotes} preventivi di test.`)
@@ -764,72 +1396,125 @@ class ACME {
   }
 
   renderTestLab() {
-    const t = this.testLab;
-    const d = t.data;
-    const busy = !!t.busy;
-    const icon = (id) => this.testChecks[id] === 'ok' ? '✅' : (this.testChecks[id] === 'ko' ? '❌' : '⚪');
-    const card = (s) => `
-      <div class="booking-row" style="padding-right:16px;">
-        <div class="row-top">
-          <div class="name">${this.escape(s.title)}</div>
-          <button class="test-toggle" onclick="app.cycleTestCheck('${s.id}')">${icon(s.id)}</button>
-        </div>
-        ${s.name ? `<div class="rate-info">da ${this.escape(s.name)}</div>` : ''}
-        <ul class="test-checks">${s.checks.map(c => `<li>${this.escape(c)}</li>`).join('')}</ul>
-      </div>`;
-
-    let body;
-    if (!d) {
-      body = t.error
+    const t = this.testLab, d = t.data, s = this.testSession;
+    const head = `
+      <div class="list-header"><div class="back" onclick="app.goBack()">‹ ACME</div></div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Laboratorio di test</h1></div>`;
+    if (!d || !s) {
+      return head + (t.error
         ? `<div class="error-banner">${this.escape(t.error)}</div>`
-        : `<div class="loading"><div class="spinner"></div>Carico il laboratorio…</div>`;
-    } else {
-      const all = [...d.scenarios, ...d.bookingScenarios];
-      const ok = all.filter(s => this.testChecks[s.id] === 'ok').length;
-      const ko = all.filter(s => this.testChecks[s.id] === 'ko').length;
-      const groupA = d.scenarios.filter(s => s.batch === 'A');
-      const groupB = d.scenarios.filter(s => s.batch === 'B');
-      const bookingTotal = d.bookingScenarios.reduce((n, s) => n + s.count, 0);
-      body = `
-        ${t.message ? `<div class="sent-confirm" style="margin:0 0 16px;">${this.escape(t.message)}</div>` : ''}
-        ${t.error ? `<div class="error-banner">${this.escape(t.error)}</div>` : ''}
-        ${!d.scopeOk ? `<div class="discrepancy-banner">Serve un permesso Gmail in più per inserire le email di prova.<button class="btn btn-primary" style="margin-top:10px;" onclick="app.reconnectGmail()">Riconnetti Gmail</button></div>` : ''}
-
-        <div class="detail-card" style="font-size:13px; line-height:1.5; color:var(--text-secondary);">
-          Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi del tipo <b>${this.escape(d.ownEmail.replace('@', '+acmetest.nome@'))}</b>: Gmail li recapita sempre a te, quindi risposte e preventivi tornano nella tua inbox e non escono verso nessun altro. Tocca il cerchio di ogni prova per segnarla ✅ o ❌.
-        </div>
-
-        <div class="detail-card" style="text-align:center;">
-          <div style="font-size:22px; font-weight:700;">${ok} ✅ &nbsp; ${ko} ❌ &nbsp; ${all.length - ok - ko} ⚪</div>
-          <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Presenti ora: ${d.counts.emails} email e ${d.counts.bookings} prenotazioni di test</div>
-        </div>
-
-        <div class="section-title">1 · Email di prova</div>
-        <div class="btn-row" style="margin-bottom:12px;">
-          <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'A'}, 'Inserisco le email…', r => r.inserted + ' email inserite (gruppo A). Torna alla dashboard.')">${t.busy || 'Inserisci gruppo A (' + groupA.length + ')'}</button>
-          <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'B'}, 'Inserisco le email…', r => r.inserted + ' email inserite (gruppo B). Torna alla dashboard.')">${t.busy || 'Inserisci gruppo B (' + groupB.length + ')'}</button>
-        </div>
-        <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 12px;">Due gruppi perché la dashboard legge le ultime mail della inbox: inserirle tutte insieme ne nasconderebbe alcune.</div>
-        <div class="section-title">Gruppo A — flusso prenotazione</div>
-        ${groupA.map(card).join('')}
-        <div class="section-title">Gruppo B — casi difficili</div>
-        ${groupB.map(card).join('')}
-
-        <div class="section-title">2 · Prenotazioni di test</div>
-        <button class="btn btn-send" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-bookings', {}, 'Creo le prenotazioni…', r => r.inserted + ' prenotazioni di test create.')">${t.busy || 'Crea ' + bookingTotal + ' prenotazioni di test'}</button>
-        ${d.bookingScenarios.map(card).join('')}
-
-        <div class="section-title">Pulizia</div>
-        <button class="btn btn-reject" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">🗑️ Elimina tutti i dati di test</button>
-        <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Da fare prima di usare l'app sul serio, così statistiche e promemoria partono puliti.</div>`;
+        : `<div class="loading"><div class="spinner"></div>Carico il laboratorio…</div>`);
     }
+    const busy = !!t.busy;
+    const enc = (k) => encodeURIComponent(k).replace(/'/g, '%27');
+    const icon = (id) => { const e = this.testEffective(id); return e === 'ok' ? '✅' : (e === 'ko' ? '❌' : '⚪'); };
 
-    return `
-      <div class="list-header">
-        <div class="back" onclick="app.goBack()">‹ ACME</div>
+    const card = (x, canInsert) => {
+      const r = s.results[x.id] || {};
+      const autos = (s.autoResults || []).filter(a => a.scenarioId === x.id);
+      return `
+        <div class="booking-row" style="padding-right:16px;">
+          <div class="row-top">
+            <div class="name">${this.escape(x.title)}</div>
+            <button class="test-toggle" onclick="app.cycleTestCheck('${x.id}')">${icon(x.id)}</button>
+          </div>
+          ${x.name ? `<div class="rate-info">da ${this.escape(x.name)}</div>` : ''}
+          <ul class="test-checks">${x.checks.map(c => `<li>${this.escape(c)}</li>`).join('')}</ul>
+          ${autos.map(a => `<div class="test-auto ${a.ok ? 'ok' : 'ko'}">🤖 ${a.ok ? '✓' : '✗'} ${this.escape(a.detail || a.title)}</div>`).join('')}
+          ${r.note ? `<div class="test-note" onclick="app.editTestNote('${x.id}')">📝 ${this.escape(r.note)}</div>` : ''}
+          ${canInsert ? `<button class="btn btn-secondary" style="margin-top:10px; padding:8px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'${x.id}'}, 'Inserisco…', (r, ib) => app.seedMessage(r, ib))">Inserisci solo questa</button>` : ''}
+        </div>`;
+    };
+
+    const sum = this.testSummary();
+    const issues = this.collectIssues();
+    const groupA = d.scenarios.filter(x => x.batch === 'A');
+    const groupB = d.scenarios.filter(x => x.batch === 'B');
+    const bookingTotal = d.bookingScenarios.reduce((n, x) => n + x.count, 0);
+    const autos = s.autoResults || [];
+    const autoFails = autos.filter(a => !a.ok);
+    const autoPass = autos.filter(a => a.ok);
+    const days = Math.max(0, Math.round((Date.now() - new Date(s.startedAt).getTime()) / 86400000));
+
+    const reportPanel = this.testReport ? `
+      <div class="detail-card">
+        <div class="section-title" style="margin-top:0;">${this.testReport.closed ? 'Report della sessione' : 'Anteprima del report'}</div>
+        <textarea readonly class="form-input report-box">${this.escape(this.testReport.text)}</textarea>
+        <div class="btn-row">
+          <button class="btn btn-send" onclick="app.shareTestReport()">📤 Condividi come file</button>
+          <button class="btn btn-secondary" onclick="app.copyTestReport()">📋 Copia testo</button>
+        </div>
+        <button class="btn btn-reject" style="width:100%; margin-top:8px;" onclick="app.testReport = null; app.render()">Chiudi</button>
+      </div>` : '';
+
+    const historyPanel = this.testHistoryCount > 0 ? `
+      <div class="section-title">Report precedenti (${this.testHistoryCount})</div>
+      ${this.testHistory === null
+        ? `<button class="btn btn-secondary" style="width:100%;" onclick="app.loadTestHistory()">Mostra i report salvati</button>`
+        : this.testHistory.map((h, i) => `
+          <div class="booking-row" onclick="app.openHistoryReport(${i})">
+            <div class="name">${new Date(h.closedAt).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+            <div class="rate-info">✅ ${(h.summary || {}).ok || 0} · ❌ ${(h.summary || {}).ko || 0} · ${(h.summary || {}).errors || 0} errori</div>
+          </div>`).join('')}` : '';
+
+    return `${head}
+      ${t.message ? `<div class="sent-confirm" style="margin:0 0 16px;">${this.escape(t.message)}</div>` : ''}
+      ${t.error ? `<div class="error-banner">${this.escape(t.error)}</div>` : ''}
+      ${!d.scopeOk ? `<div class="discrepancy-banner">Serve un permesso Gmail in più per inserire le email di prova.<button class="btn btn-primary" style="margin-top:10px;" onclick="app.reconnectGmail()">Riconnetti Gmail</button></div>` : ''}
+      ${reportPanel}
+
+      <div class="detail-card" style="font-size:13px; line-height:1.5; color:var(--text-secondary);">
+        Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi tipo <b>${this.escape(d.ownEmail.replace('@', '+acmetest.nome@'))}</b>: Gmail li recapita a te, quindi risposte e preventivi tornano nella tua inbox e non escono verso nessun altro. Tocca il cerchio di una prova per segnarla ✅ o ❌ (con ❌ puoi scrivere cosa è successo). Tutto resta salvato anche per giorni.
       </div>
-      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Laboratorio di test</h1></div>
-      ${body}`;
+
+      <div class="detail-card" style="text-align:center;">
+        <div style="font-size:22px; font-weight:700;">${sum.ok} ✅ &nbsp; ${sum.ko} ❌ &nbsp; ${sum.todo} ⚪</div>
+        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Sessione aperta da ${days} giorni · ${sum.errors} errori, ${sum.warnings} avvisi · ora presenti: ${d.counts.emails} email e ${d.counts.bookings} prenotazioni di test</div>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.runAutoChecks()">${t.busy && t.busy.startsWith('Controlli') ? t.busy : '🤖 Esegui i controlli automatici'}</button>
+      ${autos.length ? `
+        <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 8px;">Ultima esecuzione: ${new Date(s.autoRunAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })} · ${autoPass.length}/${autos.length} superati</div>
+        ${autoFails.map(a => `<div class="booking-row" style="padding-right:16px;"><div class="name">${a.severity === 'errore' ? '❌' : '⚠️'} ${this.escape(a.title)}</div><div class="rate-info">${this.escape(a.group)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div></div>`).join('')}
+        <details class="test-details"><summary>${autoPass.length} controlli superati</summary>
+          ${autoPass.map(a => `<div class="test-auto ok">✓ ${this.escape(a.title)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div>`).join('')}
+        </details>` : ''}
+
+      <div class="section-title">Problemi aperti (${issues.length})</div>
+      ${issues.length ? issues.map(it => `
+        <div class="booking-row" style="padding-right:${it.removable ? 44 : 16}px;">
+          ${it.removable ? `<button class="dismiss-btn" onclick="app.removeFinding('${enc(it.key)}')">✕</button>` : ''}
+          <div class="name">${it.sev === 'errore' ? '❌' : '⚠️'} ${this.escape(it.title)}</div>
+          <div class="rate-info">${this.escape(it.origin)}${it.count > 1 ? ' · ×' + it.count : ''}</div>
+          ${(it.detail || (it.details && it.details[0])) ? `<div class="test-checks" style="list-style:none; margin-left:0;">${this.escape(it.detail || it.details[0])}</div>` : ''}
+        </div>`).join('') : `<div class="empty" style="padding:20px;">Nessun problema aperto</div>`}
+      <div class="btn-row" style="margin:12px 0 8px;">
+        <button class="btn btn-secondary" onclick="app.reportProblem()">🐞 Segnala un problema</button>
+        <button class="btn btn-secondary" onclick="app.previewTestReport()">📄 Anteprima report</button>
+      </div>
+      <button class="btn btn-send" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmCloseTestSession()">${t.busy === 'Genero il report…' ? t.busy : '✅ Chiudi la sessione e genera il report'}</button>
+      <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Il report elenca solo cosa non va, con il contesto per correggerlo: condividilo come file o copialo e incollalo nella chat con Claude.</div>
+
+      <div class="section-title">1 · Email di prova</div>
+      <div class="btn-row" style="margin-bottom:12px;">
+        <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'A'}, 'Inserisco le email…', (r, ib) => app.seedMessage(r, ib))">${t.busy && t.busy.startsWith('Inserisco') ? t.busy : 'Inserisci gruppo A (' + groupA.length + ')'}</button>
+        <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'B'}, 'Inserisco le email…', (r, ib) => app.seedMessage(r, ib))">${t.busy && t.busy.startsWith('Inserisco') ? t.busy : 'Inserisci gruppo B (' + groupB.length + ')'}</button>
+      </div>
+      <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 12px;">Due gruppi perché la dashboard legge le ultime mail della inbox: inserirle tutte insieme ne nasconderebbe alcune. Se l'analisi va in timeout, usa «Inserisci solo questa».</div>
+      <div class="section-title">Gruppo A — flusso prenotazione</div>
+      ${groupA.map(x => card(x, true)).join('')}
+      <div class="section-title">Gruppo B — casi difficili</div>
+      ${groupB.map(x => card(x, true)).join('')}
+
+      <div class="section-title">2 · Prenotazioni di test</div>
+      <button class="btn btn-send" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-bookings', {}, 'Creo le prenotazioni…', r => r.inserted + ' prenotazioni di test create.')">${t.busy && t.busy.startsWith('Creo') ? t.busy : 'Crea ' + bookingTotal + ' prenotazioni di test'}</button>
+      ${d.bookingScenarios.map(x => card(x, false)).join('')}
+
+      ${historyPanel}
+
+      <div class="section-title">Pulizia</div>
+      <button class="btn btn-reject" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">🗑️ Elimina tutti i dati di test</button>
+      <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Da fare prima di usare l'app sul serio, così statistiche e promemoria partono puliti.</div>`;
   }
 
   openReminders() {
@@ -2330,6 +3015,11 @@ Domus 106`;
           <span class="settings-label">Email colf/pulizie</span>
           <span class="settings-chevron">›</span>
         </div>
+        <div class="settings-row" onclick="app.reportProblem()">
+          <span class="settings-icon">🐞</span>
+          <span class="settings-label">Segnala un problema</span>
+          <span class="settings-chevron">›</span>
+        </div>
         <div class="settings-row" onclick="app.openTestLab()">
           <span class="settings-icon">🧪</span>
           <span class="settings-label">Laboratorio di test</span>
@@ -2810,6 +3500,11 @@ Domus 106`;
   }
 
   render() {
+    if (this._lastView !== this.view) {
+      this._lastView = this.view;
+      this.viewTrail.push(this.view);
+      if (this.viewTrail.length > 8) this.viewTrail.shift();
+    }
     const el = document.getElementById('app');
     if (this.view === 'setup') el.innerHTML = this.renderSetup();
     else if (this.view === 'login') el.innerHTML = this.renderLogin();
@@ -2839,6 +3534,7 @@ Domus 106`;
 }
 
 const app = new ACME();
+window.__acme = app;
 app.init();
 
 if ('serviceWorker' in navigator) {
