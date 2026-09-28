@@ -353,7 +353,7 @@ async function status(token, own) {
     ownEmail: own,
     scopeOk: await hasModifyScope(token),
     counts: { emails, bookings },
-    scenarios: emailScenarios(t).map(({ id, batch, name, title, checks }) => ({ id, batch, name, title, checks })),
+    scenarios: emailScenarios(t).map(({ id, batch, name, title, checks, tag }) => ({ id, batch, name, title, checks, tag, ...(EXPECT[id] || {}) })),
     bookingScenarios: bookingScenarios(t, own).map(({ id, title, checks, rows }) => ({ id, title, checks, count: rows.length }))
   };
 }
@@ -367,6 +367,7 @@ async function seedEmails(token, own, batch) {
 
   const labelId = await getLabelId(token, true);
   const n = list.length;
+  const ids = [];
   await Promise.all(list.map(async (s, i) => {
     // date scaglionate, così l'ordine in inbox segue l'ordine dei numeri
     const date = new Date(Date.now() - (n - 1 - i) * 60000 - 20000);
@@ -377,8 +378,33 @@ async function seedEmails(token, own, batch) {
       body: JSON.stringify({ raw: toBase64Url(raw), labelIds: ['INBOX', 'UNREAD', labelId] })
     });
     if (!r.ok) throw new Error('Inserimento fallito (' + r.status + '): ' + (await r.text()).slice(0, 150));
+    const j = await r.json();
+    if (j.id) ids.push(j.id);
   }));
-  return { inserted: n };
+
+  // Verifica: Gmail ha accettato le mail, ma la dashboard le legge con una
+  // ricerca (is:inbox) il cui indice si aggiorna con qualche secondo di ritardo.
+  // Aspetto che le veda, così l'aggiornamento successivo non parte a vuoto.
+  const top = async (q) => {
+    const r = await gmail(token, `/messages?q=${encodeURIComponent(q)}&maxResults=8`);
+    const j = await r.json();
+    return new Set((j.messages || []).map(m => m.id));
+  };
+  const expected = Math.min(ids.length, 8);
+  let top8 = await top('is:inbox');
+  for (let tries = 0; tries < 2 && ids.filter(id => top8.has(id)).length < expected; tries++) {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    top8 = await top('is:inbox');
+  }
+  // Il controllo automatico (check-urgent) usa "-from:me": se Gmail considera "da te" gli
+  // indirizzi con il +, quelle mail non genererebbero mai una push.
+  const top8NoMe = await top('is:inbox -from:me');
+  return {
+    scenarioIds: list.map(x => x.id),
+    inserted: ids.length,
+    inTop8: ids.filter(id => top8.has(id)).length,
+    inTop8NoMe: ids.filter(id => top8NoMe.has(id)).length
+  };
 }
 
 async function seedBookings(own) {
@@ -434,6 +460,104 @@ async function cleanup(token, own) {
   return { trashed: all.length, bookings, quotes };
 }
 
+// ---------- registro delle sessioni di test (persistente, su Supabase) ----------
+// Riusa la tabella app_state (id, value) già presente: nessuna query SQL nuova.
+const SESSION_KEY = 'test_lab_session';
+const HISTORY_KEY = 'test_lab_history';
+const freshSession = () => ({
+  startedAt: new Date().toISOString(), results: {}, seeded: {}, bookingsSeeded: false,
+  findings: [], autoResults: [], autoRunAt: null
+});
+
+async function stateGet(id) {
+  const r = await sb(`app_state?id=eq.${id}&select=value`);
+  const rows = r.ok ? await r.json() : [];
+  if (!rows[0] || !rows[0].value) return null;
+  try { return JSON.parse(rows[0].value); } catch (e) { return null; }
+}
+
+async function stateSet(id, obj) {
+  const r = await sb('app_state?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ id, value: JSON.stringify(obj) })
+  });
+  if (!r.ok) throw new Error('Salvataggio del registro fallito: ' + (await r.text()).slice(0, 150));
+}
+
+// ---------- cosa ci si aspetta da ogni email di prova (controlli automatici) ----------
+const EXPECT = {
+  preventivo:    { subjectPrefix: 'Richiesta disponibilità', expect: { categories: ['Prenotazione'] } },
+  conferma:      { subjectPrefix: 'R: Preventivo soggiorno', expect: { categories: ['Prenotazione'] } },
+  incoerente:    { subjectPrefix: 'Conferma preventivo', expect: { categories: ['Prenotazione'], discrepancy: true } },
+  ritorno:       { subjectPrefix: 'Ci siamo già stati', expect: { categories: ['Prenotazione', 'Richiesta informazioni'] } },
+  info:          { subjectPrefix: 'Alcune domande prima di prenotare', expect: { categories: ['Richiesta informazioni'] },
+                   responseChecks: [
+                     { label: 'Dice che la colazione è inclusa (non lo è)', severity: 'errore', mustNotMatch: "colazione (è |e' )?(inclusa|compresa)|(inclusa|compresa) la colazione", flags: 'i' },
+                     { label: 'Nessuna risposta cita la distanza dalla spiaggia (circa 1,6 km)', severity: 'avviso', mustMatchAny: '1[,.]6\\s*(km|chilometri)|1600\\s*m', flags: 'i' }
+                   ] },
+  cancellazione: { subjectPrefix: 'Devo cancellare', expect: { categories: ['Cancellazione'] },
+                   responseChecks: [
+                     { label: 'Nessuna risposta cita il rimborso del 50%', severity: 'avviso', mustMatchAny: '50\\s?%|metà|cinquanta', flags: 'i' },
+                     { label: 'Promette un rimborso totale (con 10 giorni di anticipo spetta il 50%)', severity: 'errore', mustNotMatch: 'rimborso (totale|completo|integrale)|100\\s?%', flags: 'i' }
+                   ] },
+  lamentela:     { subjectPrefix: 'Vergognoso', expect: { categories: ['Lamentela'], tones: ['Arrabbiato', 'Urgente'] },
+                   responseChecks: [
+                     { label: 'Promette un rimborso totale senza verifiche', severity: 'avviso', mustNotMatch: 'rimborso (totale|completo|integrale)|100\\s?%', flags: 'i' }
+                   ] },
+  tecnico:       { subjectPrefix: 'Türcode', expect: { categories: ['Problema tecnico'], tones: ['Urgente', 'Arrabbiato'] },
+                   responseChecks: [
+                     { label: 'Nessuna risposta è in tedesco', severity: 'avviso', mustMatchAny: '\\b(Guten|Sehr geehrte|Danke|Entschuldigung|Türcode)\\b', flags: 'i' }
+                   ] },
+  fattura:       { subjectPrefix: 'Richiesta fattura', expect: { categories: ['Fatturazione'] } },
+  complimento:   { subjectPrefix: 'Grazie di tutto', expect: { categories: ['Complimento'] } },
+  ambigua:       { subjectPrefix: 'Re:', expect: { categories: ['Da verificare'] } },
+  multi:         { subjectPrefix: 'Due cose', expect: { categories: ['Lamentela', 'Da verificare'] } },
+  html:          { subjectPrefix: 'Nuova richiesta di prenotazione', expect: { categories: ['Prenotazione'], bodyNotEmpty: true } }
+};
+
+// ---------- diagnostica di sistema ----------
+async function diag(token) {
+  const checks = [];
+  const add = (key, title, ok, detail, severity) =>
+    checks.push({ key, group: 'Sistema', title, ok: !!ok, detail: detail || '', severity: severity || 'errore' });
+
+  for (const name of ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'ANTHROPIC_API_KEY', 'CRON_SECRET']) {
+    const auto = name === 'ANTHROPIC_API_KEY' || name === 'CRON_SECRET';
+    add('env:' + name, `Variabile ${name} su Vercel`, !!process.env[name],
+      'Non impostata: ' + (auto ? 'il controllo automatico ogni 5 minuti non può funzionare' : 'una parte dell\'app non funzionerà'));
+  }
+
+  // Tabelle e colonne che il codice si aspetta: rivela le query SQL non ancora eseguite
+  const tables = [
+    ['confirmed_bookings', 'id,code,guest_name,guest_email,check_in,check_out,total,status,guests,payment_status,rate_per_night,discount_percent,notes,checkout_reviewed,concluded_at,cleaner_notified,cleaner_confirmed,source_from,source_subject,source_body'],
+    ['pending_quotes', 'guest_email,guest_name,check_in,check_out,rate_per_night,discount_percent,guests,total,source_subject,created_at'],
+    ['analyzed_emails', 'id,category,tone,discrepancy,responses,resolved'],
+    ['app_state', 'id,value'],
+    ['push_subscriptions', 'id,subscription']
+  ];
+  for (const [table, cols] of tables) {
+    try {
+      const r = await sb(`${table}?select=${cols}&limit=1`);
+      add('db:' + table, `Tabella ${table} con tutte le colonne attese`, r.ok, r.ok ? '' : (await r.text()).slice(0, 220));
+    } catch (e) { add('db:' + table, `Tabella ${table}`, false, e.message); }
+  }
+
+  const one = async (path) => { const r = await sb(path); return r.ok ? await r.json() : []; };
+  const tk = await one('app_state?id=eq.gmail_refresh_token&select=value');
+  add('cron:token', 'Token Gmail salvato per il controllo automatico', !!(tk[0] && tk[0].value),
+    'Riconnetti Gmail: senza, il controllo ogni 5 minuti non legge la posta');
+  const ce = await one('app_state?id=eq.cleaner_email&select=value');
+  add('cfg:cleaner', 'Email della persona delle pulizie configurata', !!(ce[0] && ce[0].value),
+    'Nessun avviso pulizie partirà finché non la imposti (Impostazioni)', 'avviso');
+  const ps = await one('push_subscriptions?select=id&limit=1');
+  add('push:subs', 'Almeno un dispositivo iscritto alle notifiche push', ps.length > 0,
+    'Attiva le notifiche da Impostazioni', 'avviso');
+  add('gmail:scope', 'Permesso Gmail per il laboratorio', await hasModifyScope(token),
+    'Impostazioni → Riconnetti Gmail', 'avviso');
+  return checks;
+}
+
 // ---------- handler ----------
 export default async function handler(req, res) {
   const refresh = req.cookies.gmail_refresh;
@@ -456,6 +580,30 @@ export default async function handler(req, res) {
     if (action === 'seed-emails' && req.method === 'POST') return res.status(200).json(await seedEmails(token, own, (req.body || {}).batch));
     if (action === 'seed-bookings' && req.method === 'POST') return res.status(200).json(await seedBookings(own));
     if (action === 'cleanup' && req.method === 'POST') return res.status(200).json(await cleanup(token, own));
+    if (action === 'diag' && req.method === 'GET') return res.status(200).json({ checks: await diag(token) });
+    if (action === 'log-get' && req.method === 'GET') {
+      const saved = await stateGet(SESSION_KEY);
+      const history = (await stateGet(HISTORY_KEY)) || [];
+      return res.status(200).json({ session: { ...freshSession(), ...(saved || {}) }, historyCount: history.length });
+    }
+    if (action === 'log-save' && req.method === 'POST') {
+      const session = (req.body || {}).session;
+      if (!session || typeof session !== 'object') return res.status(400).json({ error: 'Sessione mancante' });
+      if (JSON.stringify(session).length > 400000) return res.status(400).json({ error: 'Registro troppo grande' });
+      await stateSet(SESSION_KEY, session);
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'log-close' && req.method === 'POST') {
+      const report = (req.body || {}).report || {};
+      const cur = (await stateGet(SESSION_KEY)) || freshSession();
+      const history = (await stateGet(HISTORY_KEY)) || [];
+      history.unshift({ closedAt: new Date().toISOString(), startedAt: cur.startedAt, summary: report.summary || {}, text: String(report.text || '').slice(0, 60000) });
+      await stateSet(HISTORY_KEY, history.slice(0, 10));
+      const fresh = freshSession();
+      await stateSet(SESSION_KEY, fresh);
+      return res.status(200).json({ session: fresh });
+    }
+    if (action === 'history-get' && req.method === 'GET') return res.status(200).json({ history: (await stateGet(HISTORY_KEY)) || [] });
     return res.status(400).json({ error: 'Azione non valida' });
   } catch (err) {
     if (err.code === 'SCOPE') {
