@@ -555,6 +555,38 @@ async function diag(token) {
     'Attiva le notifiche da Impostazioni', 'avviso');
   add('gmail:scope', 'Permesso Gmail per il laboratorio', await hasModifyScope(token),
     'Impostazioni → Riconnetti Gmail', 'avviso');
+
+  // Le mail di prova sono visibili alla ricerca che usa la dashboard? Provo le ricerche
+  // più probabili e riporto quante mail di prova trova ciascuna: dice quale filtro le scarta.
+  try {
+    const labelId = await getLabelId(token, false);
+    const listIds = async (qs) => {
+      const r = await gmail(token, `/messages?${qs}&maxResults=100`);
+      const j = await r.json();
+      return (j.messages || []).map(m => m.id);
+    };
+    const testIds = new Set(labelId ? await listIds(`labelIds=${labelId}`) : []);
+    if (testIds.size === 0) {
+      add('mail:present', 'Email di prova presenti in Gmail (etichetta ACME-TEST)', true, 'Nessuna al momento: inseriscile dal laboratorio');
+    } else {
+      const queries = ['is:inbox', 'is:inbox -from:me', 'is:inbox category:primary', 'is:inbox is:unread'];
+      const lists = await Promise.all(queries.map(q => listIds('q=' + encodeURIComponent(q))));
+      const count = (ids, n) => ids.slice(0, n).filter(id => testIds.has(id)).length;
+      add('mail:present', 'Email di prova presenti in Gmail (etichetta ACME-TEST)', true,
+        `${testIds.size} email di prova, ${count(lists[0], 100)} nella posta in arrivo`);
+      queries.forEach((q, i) => {
+        const in8 = count(lists[i], 8), in100 = count(lists[i], 100);
+        const ok = in100 === testIds.size && (i !== 0 || in8 > 0);
+        let detail = `${in100} su ${testIds.size} nelle prime 100 · ${in8} su 8 tra le più recenti sono di prova`;
+        if (!ok && i === 0) detail += ' — la dashboard legge le ultime 8: se nessuna è di prova, altre mail più recenti le nascondono';
+        if (!ok && i === 1) detail += ' — Gmail considera «da te» le mail con il «+»: la ricerca con -from:me le scarta';
+        if (!ok && i === 2) detail += ' — le mail inserite non hanno la categoria «Principale»';
+        add('mail:q:' + i, `La ricerca «${q}» trova le mail di prova`, ok, detail, i === 0 ? 'errore' : 'avviso');
+      });
+    }
+  } catch (e) {
+    add('mail:diag', 'Diagnosi delle mail di prova', false, e.message, 'avviso');
+  }
   return checks;
 }
 
