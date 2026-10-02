@@ -24,6 +24,8 @@
     --radius-sm: 10px;
     --radius-md: 14px;
     --radius-lg: 20px;
+    --shadow-card: 0 1px 2px rgba(28,28,30,0.04), 0 6px 18px rgba(28,28,30,0.05);
+    --shadow-card-active: 0 1px 1px rgba(28,28,30,0.04), 0 2px 6px rgba(28,28,30,0.05);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body {
@@ -68,15 +70,16 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .card {
     background: var(--card);
-    border: 1px solid rgba(60,60,67,0.06);
+    border: 1px solid rgba(60,60,67,0.05);
     border-radius: var(--radius-lg);
     padding: 18px;
     position: relative;
     overflow: hidden;
-    transition: transform 0.15s ease;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
     cursor: pointer;
   }
-  .card:active { transform: scale(0.97); }
+  .card:active { transform: scale(0.97); box-shadow: var(--shadow-card-active); }
   .card .icon {
     width: 40px; height: 40px;
     border-radius: var(--radius-sm);
@@ -104,15 +107,16 @@
 
   .booking-row {
     background: var(--card);
-    border: 1px solid rgba(60,60,67,0.06);
+    border: 1px solid rgba(60,60,67,0.05);
     border-radius: var(--radius-md);
     padding: 14px 44px 14px 16px;
     margin-bottom: 10px;
     position: relative;
     cursor: pointer;
-    transition: transform 0.15s ease;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
-  .booking-row:active { transform: scale(0.98); }
+  .booking-row:active { transform: scale(0.98); box-shadow: var(--shadow-card-active); }
   .booking-row .name { font-size: 15px; font-weight: 600; margin-bottom: 4px; padding-right: 30px; }
   .booking-row .dates { font-size: 13px; color: var(--text-secondary); }
   .booking-row .dates b { color: var(--text); font-weight: 700; }
@@ -175,7 +179,7 @@
 
   .hero-card {
     background: var(--card);
-    border: 1px solid rgba(60,60,67,0.06);
+    border: 1px solid rgba(60,60,67,0.05);
     border-radius: var(--radius-lg);
     padding: 20px;
     display: flex;
@@ -183,9 +187,10 @@
     gap: 16px;
     margin-bottom: 12px;
     cursor: pointer;
-    transition: transform 0.15s ease, background 0.15s ease;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   }
-  .hero-card:active { transform: scale(0.98); }
+  .hero-card:active { transform: scale(0.98); box-shadow: var(--shadow-card-active); }
   .hero-card .hero-icon {
     width: 52px; height: 52px; flex-shrink: 0;
     border-radius: var(--radius-sm);
@@ -206,11 +211,12 @@
 
   .hero-row { display: flex; gap: 12px; margin-bottom: 12px; }
   .hero-half {
-    flex: 1; background: var(--card); border: 1px solid rgba(60,60,67,0.06);
+    flex: 1; background: var(--card); border: 1px solid rgba(60,60,67,0.05);
     border-radius: var(--radius-lg); padding: 16px; cursor: pointer;
-    transition: transform 0.15s ease, background 0.15s ease;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   }
-  .hero-half:active { transform: scale(0.97); }
+  .hero-half:active { transform: scale(0.97); box-shadow: var(--shadow-card-active); }
   .hero-half .hero-icon {
     width: 40px; height: 40px; border-radius: var(--radius-sm);
     background: rgba(142,142,147,0.12); display: flex; align-items: center; justify-content: center;
@@ -249,20 +255,26 @@
 
   .email-row {
     background: var(--card);
+    border: 1px solid rgba(60,60,67,0.05);
     border-radius: var(--radius-md);
     padding: 14px 44px 14px 16px;
     margin-bottom: 10px;
     cursor: pointer;
-    transition: transform 0.15s ease;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
     position: relative;
+    overflow: hidden;
   }
-  .email-row:active { transform: scale(0.98); }
-  .email-row .from { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
-  .row-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .email-row:active { transform: scale(0.98); box-shadow: var(--shadow-card-active); }
+  .email-row .from { font-size: 15px; font-weight: 600; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+  .row-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
   .email-date { font-size: 12px; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0; }
-  .email-row .subject { font-size: 14px; color: var(--text); margin-bottom: 4px; opacity: 0.85; }
+  .email-row .subject { font-size: 14px; color: var(--text); margin-bottom: 4px; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .email-row .preview { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .email-row .ready-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--green); font-weight: 600; margin-top: 6px; }
+  .email-row .ready-badge {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700;
+    color: var(--green); background: rgba(52,199,89,0.12); padding: 3px 9px; border-radius: 100px; margin-top: 8px;
+  }
   .dismiss-btn {
     position: absolute;
     top: 10px;
@@ -287,6 +299,7 @@
     border-radius: var(--radius-lg);
     padding: 16px;
     margin-bottom: 16px;
+    box-shadow: var(--shadow-card);
   }
   .detail-row { font-size: 14px; margin-bottom: 6px; }
   .detail-row .label { color: var(--text-secondary); margin-right: 6px; }
@@ -3231,7 +3244,7 @@ Domus 106`;
         <div class="email-row" onclick='app.openEmail(${safeEmail})'>
           <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissEmail(${safeEmail})'>✕</button>
           <div class="row-top">
-            <div class="from">${this.escape(e.from)}</div>
+            <div class="from">${this.escape(this.extractGuestName(e.from))}</div>
             <div class="email-date">${this.formatDate(e.date)}</div>
           </div>
           <div class="subject">${this.escape(e.subject)}</div>
