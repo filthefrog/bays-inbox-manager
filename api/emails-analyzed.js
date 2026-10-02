@@ -1,6 +1,7 @@
 import { getFreshAccessToken } from '../lib/gmail-token.js';
 import { sendPushToAll } from '../lib/send-push.js';
 import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
+import { LABEL_NAME } from './test-lab.js';
 
 export default async function handler(req, res) {
   const refreshToken = req.cookies.gmail_refresh;
@@ -26,21 +27,52 @@ export default async function handler(req, res) {
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
   const hasCache = !!(SUPABASE_URL && SUPABASE_KEY);
 
-  try {
-    const listResponse = await fetch(
-      "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me") + "&maxResults=8",
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+  // Recupera gli id dei messaggi per una query Gmail. Non fatale: in caso di
+  // errore ritorna lista vuota, così un problema su una delle due ricerche
+  // non fa cadere l'intera dashboard.
+  async function listMessageIds(query, maxResults) {
+    try {
+      const r = await fetch(
+        "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent(query) + "&maxResults=" + maxResults,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!r.ok) return { ok: false, ids: [], status: r.status, detail: (await r.text()).slice(0, 200) };
+      const j = await r.json();
+      return { ok: true, ids: (j.messages || []).map(m => m.id) };
+    } catch (e) {
+      return { ok: false, ids: [], status: 0, detail: e.message };
+    }
+  }
 
-    if (!listResponse.ok) {
-      const detail = await listResponse.text();
-      return res.status(listResponse.status === 401 ? 401 : 502).json({
-        error: "Gmail list fetch failed: " + detail.slice(0, 200)
+  try {
+    // Due ricerche separate invece di una sola:
+    // - la posta reale, come prima (esclude le tue mail e quelle di test)
+    // - la posta di test, SEMPRE per etichetta Gmail "ACME-TEST" — non per
+    //   "-from:me", che può escluderla a seconda di come Gmail classifica le
+    //   mail inserite via API, e non in competizione con la posta reale per
+    //   gli stessi 8 posti: altrimenti basta un po' di traffico vero perché
+    //   le mail di prova spariscano dalla Dashboard senza nessun errore.
+    const [real, test] = await Promise.all([
+      listMessageIds(`is:inbox -from:me -label:${LABEL_NAME}`, 8),
+      listMessageIds(`is:inbox label:${LABEL_NAME}`, 20)
+    ]);
+
+    if (!real.ok) {
+      return res.status(real.status === 401 ? 401 : 502).json({
+        error: "Gmail list fetch failed: " + real.detail
       });
     }
+    // Se la ricerca per etichetta fallisce non blocchiamo la dashboard: la
+    // posta reale resta comunque visibile, semplicemente quella di test non
+    // compare in questo giro (succede ad es. se l'etichetta non esiste
+    // ancora perché non è mai stata seminata nessuna mail di prova).
 
-    const listData = await listResponse.json();
-    const messageIds = listData.messages || [];
+    const seenIds = new Set();
+    const messageIds = [...real.ids, ...test.ids].filter(id => {
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
 
     if (messageIds.length === 0) {
       return res.status(200).json({ byCategory: {}, totalEmails: 0 });
@@ -48,16 +80,16 @@ export default async function handler(req, res) {
 
     // Fetch dettagli email da Gmail
     const detailResults = await Promise.allSettled(
-      messageIds.map(async (msg) => {
+      messageIds.map(async (id) => {
         const detailResponse = await fetch(
-          `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+          `https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!detailResponse.ok) throw new Error("detail fetch failed");
         const detail = await detailResponse.json();
         const headers = detail.payload.headers;
         return {
-          id: msg.id,
+          id,
           from: headers.find(h => h.name === "From")?.value || "Unknown",
           subject: headers.find(h => h.name === "Subject")?.value || "(No subject)",
           date: headers.find(h => h.name === "Date")?.value || "",
@@ -171,7 +203,8 @@ export default async function handler(req, res) {
       totalEmails: analyzedEmails.length,
       fromCache: Object.keys(cached).length,
       newlyAnalyzed: toAnalyze.length,
-      cacheEnabled: hasCache
+      cacheEnabled: hasCache,
+      testLabelOk: test.ok
     });
 
   } catch (error) {
