@@ -1,16 +1,21 @@
 import { Buffer } from 'buffer';
 import { randomUUID, randomBytes } from 'crypto';
 import { getFreshAccessToken } from '../lib/gmail-token.js';
+import { sendPushToAll } from '../lib/send-push.js';
+import { extractBody } from '../lib/analyze-email.js';
 
 // LABORATORIO DI TEST — da eliminare (o lasciare inutilizzato) dopo il collaudo.
 //
 // Inserisce nella TUA inbox email finte, come se le avessero scritte degli
 // ospiti veri. Ogni "ospite" ha un indirizzo del tipo
-//     tuamail+acmetest.nome@gmail.com
-// che Gmail recapita sempre a te: quando l'app risponde o manda un preventivo
-// a uno di questi indirizzi, la mail torna nella TUA inbox e non esce mai
-// verso persone reali. Tutto ciò che è di test è riconoscibile da "+acmetest"
-// e dall'etichetta Gmail "ACME-TEST", quindi si può cancellare in un colpo solo.
+//     marco@acmetest.example.com
+// su un dominio riservato (example.com): non esiste e nessuna persona reale
+// può riceverlo. Non usiamo più indirizzi con il «+» della tua Gmail perché
+// Gmail li considera "da te" e la dashboard li scartava (filtro -from:me).
+// Tutto ciò che l'app manda a questi indirizzi viene deviato dal client su
+// tuamail+acmetest.reply@gmail.com, cioè torna nella TUA inbox.
+// Tutto ciò che è di test è riconoscibile da "acmetest" e dall'etichetta
+// Gmail "ACME-TEST", quindi si può cancellare in un colpo solo.
 //
 // Azioni:  GET  ?action=status
 //          POST ?action=seed-emails   { batch: 'A' | 'B' | 'all' | '<id>' }
@@ -18,7 +23,8 @@ import { getFreshAccessToken } from '../lib/gmail-token.js';
 //          POST ?action=cleanup
 
 const TAG = 'acmetest';
-const LABEL_NAME = 'ACME-TEST';
+const TEST_DOMAIN = 'acmetest.example.com';
+export const LABEL_NAME = 'ACME-TEST';
 const GMAIL = 'https://www.googleapis.com/gmail/v1/users/me';
 
 // ---------- utilità date (fuso italiano) ----------
@@ -27,6 +33,12 @@ const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDa
 const itDate = (iso) => new Date(iso + 'T12:00:00Z').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', timeZone: 'UTC' });
 const nightsBetween = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
 
+// indirizzo di un finto ospite: dominio riservato, non "da te" per Gmail
+function guest(tag) {
+  return `${tag}@${TEST_DOMAIN}`;
+}
+
+// indirizzo sulla TUA casella (con il «+»): usato solo come destinazione delle mail deviate
 function plus(own, name) {
   const [local, domain] = own.split('@');
   return `${local}+${TAG}.${name}@${domain}`;
@@ -44,7 +56,7 @@ function emailScenarios(t) {
       checks: [
         'Finisce in «Richieste prenotazioni»',
         'Formula preventivo: date lette dalla mail, tariffa e sconto suggeriti; poi «Genera e invia PDF»',
-        'La mail col PDF ti arriva in inbox (indirizzo +acmetest), non a una persona vera'
+        'La mail col PDF ti arriva in inbox (deviata a te), non a una persona vera'
       ]
     },
     {
@@ -177,7 +189,7 @@ function bookingScenarios(t, own) {
     const nights = nightsBetween(o.in, o.out);
     const disc = o.disc || 0;
     return {
-      guest_name: `TEST · ${o.name}`, guest_email: plus(own, o.tag),
+      guest_name: `TEST · ${o.name}`, guest_email: guest(o.tag),
       check_in: o.in, check_out: o.out,
       total: Math.round(nights * o.rate * (100 - disc)) / 100,
       code: code(o.in), status: o.status || 'confermata', guests: o.guests || 2,
@@ -335,12 +347,12 @@ function sb(path, opts = {}) {
   });
 }
 
-const TEST_EMAIL_FILTER = `guest_email=like.*${encodeURIComponent('+' + TAG)}*`;
+const TEST_EMAIL_FILTER = `guest_email=like.*${TAG}*`;   // copre sia i nuovi indirizzi sia i vecchi con il «+»
 
 // ---------- azioni ----------
-async function status(token, own) {
+async function status(token, own, gmailError) {
   const t = romeToday();
-  const labelId = await getLabelId(token, false);
+  const labelId = token ? await getLabelId(token, false) : null;
   let emails = 0;
   if (labelId) {
     const r = await gmail(token, `/messages?labelIds=${labelId}&maxResults=100`);
@@ -351,7 +363,10 @@ async function status(token, own) {
   const bookings = br.ok ? (await br.json()).length : 0;
   return {
     ownEmail: own,
-    scopeOk: await hasModifyScope(token),
+    gmailError: gmailError || null,
+    testDomain: TEST_DOMAIN,
+    replyAddress: own ? plus(own, 'reply') : null,
+    scopeOk: token ? await hasModifyScope(token) : false,
     counts: { emails, bookings },
     scenarios: emailScenarios(t).map(({ id, batch, name, title, checks, tag }) => ({ id, batch, name, title, checks, tag, ...(EXPECT[id] || {}) })),
     bookingScenarios: bookingScenarios(t, own).map(({ id, title, checks, rows }) => ({ id, title, checks, count: rows.length }))
@@ -371,7 +386,7 @@ async function seedEmails(token, own, batch) {
   await Promise.all(list.map(async (s, i) => {
     // date scaglionate, così l'ordine in inbox segue l'ordine dei numeri
     const date = new Date(Date.now() - (n - 1 - i) * 60000 - 20000);
-    const raw = buildRaw({ fromName: s.name, fromEmail: plus(own, s.tag), to: own, subject: s.subject, text: s.text, html: s.html, date });
+    const raw = buildRaw({ fromName: s.name, fromEmail: guest(s.tag), to: own, subject: s.subject, text: s.text, html: s.html, date });
     const r = await gmail(token, '/messages?internalDateSource=dateHeader', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -420,6 +435,7 @@ async function seedBookings(own) {
 async function cleanup(token, own) {
   const t = romeToday();
   const ids = new Set();
+  const gmailSkipped = !token;
 
   async function collect(qs) {
     let pageToken;
@@ -431,20 +447,27 @@ async function cleanup(token, own) {
     } while (pageToken && ids.size < 500);
   }
 
-  // 1) le mail inserite (etichetta) 2) le risposte/preventivi finiti sugli indirizzi di test
-  const labelId = await getLabelId(token, false);
-  if (labelId) await collect(`labelIds=${labelId}`);
-  const tags = [...emailScenarios(t).map(s => s.tag), 'oggi', 'domani', 'nove', 'duore', 'tregiorni', 'stata', 'statb'];
-  const q = [...new Set(tags)].map(tag => `to:${plus(own, tag)}`).join(' OR ');
-  await collect(`q=${encodeURIComponent(q)}`);
+  // Gmail (solo se il token è valido): 1) le mail inserite (etichetta) 2) le risposte/preventivi deviati a te
+  if (!gmailSkipped) {
+    const labelId = await getLabelId(token, false);
+    if (labelId) await collect(`labelIds=${labelId}`);
+    const tags = [...emailScenarios(t).map(s => s.tag), 'oggi', 'domani', 'nove', 'duore', 'tregiorni', 'stata', 'statb', 'reply'];
+    const q = [...new Set(tags)].map(tag => `to:${plus(own, tag)}`).join(' OR ');
+    await collect(`q=${encodeURIComponent(q)}`);
+  }
+  // le mail del collaudo automatico: anche senza Gmail so quali analisi cancellare
+  const camp = await stateGet(CAMPAIGN_KEY);
+  ((camp && camp.injected) || []).forEach(x => ids.add(x.id));
 
   const all = [...ids];
-  for (let i = 0; i < all.length; i += 500) {
-    await gmail(token, '/messages/batchModify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: all.slice(i, i + 500), addLabelIds: ['TRASH'], removeLabelIds: ['INBOX', 'UNREAD'] })
-    });
+  if (!gmailSkipped) {
+    for (let i = 0; i < all.length; i += 500) {
+      await gmail(token, '/messages/batchModify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: all.slice(i, i + 500), addLabelIds: ['TRASH'], removeLabelIds: ['INBOX', 'UNREAD'] })
+      });
+    }
   }
 
   // dati collegati su Supabase
@@ -452,12 +475,13 @@ async function cleanup(token, own) {
     const r = await sb(path, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
     return r.ok ? (await r.json()).length : 0;
   };
+  await sb(`app_state?id=in.(${CAMPAIGN_KEY},${SEEN_KEY})`, { method: 'DELETE' });   // il collaudo automatico si ferma e si azzera
   const bookings = await del(`confirmed_bookings?${TEST_EMAIL_FILTER}`);
   const quotes = await del(`pending_quotes?${TEST_EMAIL_FILTER}`);
   for (let i = 0; i < all.length; i += 100) {
     await del(`analyzed_emails?id=in.(${all.slice(i, i + 100).join(',')})`);
   }
-  return { trashed: all.length, bookings, quotes };
+  return { trashed: gmailSkipped ? 0 : all.length, bookings, quotes, gmailSkipped };
 }
 
 // ---------- registro delle sessioni di test (persistente, su Supabase) ----------
@@ -517,10 +541,11 @@ const EXPECT = {
 };
 
 // ---------- diagnostica di sistema ----------
-async function diag(token) {
+async function diag(token, gmailError) {
   const checks = [];
   const add = (key, title, ok, detail, severity) =>
     checks.push({ key, group: 'Sistema', title, ok: !!ok, detail: detail || '', severity: severity || 'errore' });
+  add('gmail:session', 'Sessione Gmail valida', !!token, gmailError || 'Riconnetti Gmail da Impostazioni');
 
   for (const name of ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'ANTHROPIC_API_KEY', 'CRON_SECRET']) {
     const auto = name === 'ANTHROPIC_API_KEY' || name === 'CRON_SECRET';
@@ -553,12 +578,12 @@ async function diag(token) {
   const ps = await one('push_subscriptions?select=id&limit=1');
   add('push:subs', 'Almeno un dispositivo iscritto alle notifiche push', ps.length > 0,
     'Attiva le notifiche da Impostazioni', 'avviso');
-  add('gmail:scope', 'Permesso Gmail per il laboratorio', await hasModifyScope(token),
+  if (token) add('gmail:scope', 'Permesso Gmail per il laboratorio', await hasModifyScope(token),
     'Impostazioni → Riconnetti Gmail', 'avviso');
 
   // Le mail di prova sono visibili alla ricerca che usa la dashboard? Provo le ricerche
   // più probabili e riporto quante mail di prova trova ciascuna: dice quale filtro le scarta.
-  try {
+  if (token) try {
     const labelId = await getLabelId(token, false);
     const listIds = async (qs) => {
       const r = await gmail(token, `/messages?${qs}&maxResults=100`);
@@ -590,29 +615,350 @@ async function diag(token) {
   return checks;
 }
 
+// =====================================================================
+// COLLAUDO AUTOMATICO DI 7 GIORNI
+// Ogni ~5 minuti il controllo automatico (api/check-urgent.js, avviato da
+// GitHub Actions) chiama runCampaignTick(): se il collaudo è attivo inserisce
+// email di prova a intervalli casuali durante il giorno, poi controlla da solo
+// se sono state analizzate e classificate come previsto e se sono comparse nella
+// dashboard. Tutto finisce in un registro (app_state) da cui nasce il report.
+// =====================================================================
+const CAMPAIGN_KEY = 'test_campaign';
+const SEEN_KEY = 'test_campaign_seen';
+const CAMPAIGN_DAYS = 7;
+const ACTIVE_FROM = 8.5;    // ore italiane: prima non arrivano email di prova
+const ACTIVE_TO = 21.5;     // dopo neanche
+const GAP_MIN = 90;         // minuti tra un'email e la successiva (~5-6 al giorno)
+const GAP_MAX = 210;
+
+// Una "storia" è una o più email dello stesso ospite. La 'conferma' arriva ore dopo il 'preventivo'.
+const STORYLINES = [
+  [{ id: 'preventivo' }, { id: 'conferma', afterMin: 180 }],
+  [{ id: 'incoerente' }], [{ id: 'info' }], [{ id: 'cancellazione' }], [{ id: 'lamentela' }], [{ id: 'tecnico' }],
+  [{ id: 'fattura' }], [{ id: 'complimento' }], [{ id: 'ambigua' }], [{ id: 'multi' }], [{ id: 'html' }]
+];
+
+const romeInfo = (d) => {
+  const parts = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
+  const hour = Number(parts.find(x => x.type === 'hour').value) % 24;
+  const minute = Number(parts.find(x => x.type === 'minute').value);
+  return { hour, minute, hf: hour + minute / 60, date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(d) };
+};
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+function addIssue(st, key, severity, title, detail, minIntervalMin) {
+  st.issues = st.issues || {};
+  const at = new Date().toISOString();
+  const it = st.issues[key] || (st.issues[key] = { key, severity, title, count: 0, firstAt: at, examples: [] });
+  // condizioni che restano vere per ore (es. token scaduto) contano una volta ogni tot minuti, non a ogni giro
+  if (minIntervalMin && it.lastAt && (Date.now() - new Date(it.lastAt).getTime()) < minIntervalMin * 60000) return;
+  it.count += 1; it.lastAt = at; it.severity = severity; it.title = title;
+  if (detail && !it.examples.includes(detail)) { it.examples.push(detail); if (it.examples.length > 3) it.examples.shift(); }
+}
+const clearIssue = (st, key) => { if (st.issues && st.issues[key]) delete st.issues[key]; };
+
+const newCampaign = () => {
+  const now = new Date();
+  return {
+    active: true, paused: false, startedAt: now.toISOString(),
+    endsAt: new Date(now.getTime() + CAMPAIGN_DAYS * 86400000).toISOString(),
+    nextDueAt: null, cycle: 0, order: null, cursor: 0, followUps: [], injected: [], issues: {},
+    ticks: { count: 0, last: null, maxGapMin: 0, byDay: {} }, diagDay: null, summaryDay: null, finishedAt: null
+  };
+};
+
+async function injectScenario(st, token, own, scenarioId, tag, nowIso) {
+  const sc = emailScenarios(romeToday()).find(x => x.id === scenarioId);
+  if (!sc) throw new Error('Scenario sconosciuto: ' + scenarioId);
+  const labelId = await getLabelId(token, true);
+  const raw = buildRaw({ fromName: sc.name, fromEmail: guest(tag), to: own, subject: sc.subject, text: sc.text, html: sc.html, date: new Date(Date.now() - 10000) });
+  const r = await gmail(token, '/messages?internalDateSource=dateHeader', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: toBase64Url(raw), labelIds: ['INBOX', 'UNREAD', labelId] })
+  });
+  if (!r.ok) throw new Error('Inserimento fallito (' + r.status + ')');
+  const j = await r.json();
+  st.injected = st.injected || [];
+  st.injected.push({ id: j.id, scenarioId, tag, at: nowIso, evaluated: false });
+  if (st.injected.length > 300) st.injected = st.injected.slice(-300);
+  return j.id;
+}
+
+function pickStoryline(st) {
+  if (!st.order || st.cursor >= st.order.length) {
+    if (st.order) st.cycle = (st.cycle || 0) + 1;
+    st.order = shuffle(STORYLINES.map((_, i) => i));
+    st.cursor = 0;
+  }
+  return STORYLINES[st.order[st.cursor++]];
+}
+
+async function launchStoryline(st, token, own, now) {
+  const line = pickStoryline(st);
+  const byId = Object.fromEntries(emailScenarios(romeToday()).map(x => [x.id, x]));
+  const suffix = '-c' + ((st.cycle || 0) + 1);   // indirizzo diverso a ogni giro (e diverso dalle prove manuali), così storico e preventivi non si mescolano
+  for (let i = 0; i < line.length; i++) {
+    const step = line[i];
+    const tag = byId[step.id].tag + suffix;
+    if (i === 0) await injectScenario(st, token, own, step.id, tag, now.toISOString());
+    else (st.followUps = st.followUps || []).push({ scenarioId: step.id, tag, notBefore: new Date(now.getTime() + step.afterMin * 60000).toISOString() });
+  }
+}
+
+const responseTexts = (responses) => {
+  let r = responses;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { r = [r]; } }
+  return (Array.isArray(r) ? r : []).map(x => (x && typeof x === 'object') ? (x.text || '') : (x || '')).filter(Boolean);
+};
+
+async function fetchBody(token, id) {
+  const r = await gmail(token, `/messages/${id}?format=full`);
+  const j = await r.json();
+  return j.payload ? extractBody(j.payload) : '';
+}
+
+// Confronta quello che l'app ha fatto con quello che ci si aspettava, mail per mail
+async function evaluatePending(st, token, now) {
+  const inj = st.injected || [];
+  const pending = inj.filter(x => !x.evaluated && (now - new Date(x.at)) >= 8 * 60000);
+  if (pending.length) {
+    const r = await sb(`analyzed_emails?id=in.(${pending.map(x => x.id).join(',')})&select=id,category,tone,discrepancy,responses,resolved`);
+    const byId = Object.fromEntries((r.ok ? await r.json() : []).map(x => [x.id, x]));
+    const titles = Object.fromEntries(emailScenarios(romeToday()).map(x => [x.id, x.title]));
+    for (const x of pending) {
+      const ageMin = Math.round((now - new Date(x.at)) / 60000);
+      const row = byId[x.id];
+      const title = titles[x.scenarioId] || x.scenarioId;
+      if (!row) {
+        if (ageMin >= 40) {
+          x.evaluated = true; x.result = { ok: false, notAnalyzed: true };
+          addIssue(st, 'na:analysis', 'errore', 'Email di prova mai analizzate dal sistema', `${title}: dopo ${ageMin} minuti nessuna analisi`);
+        }
+        continue;
+      }
+      x.evaluated = true; x.analysisMin = ageMin;
+      const ex = (EXPECT[x.scenarioId] || {});
+      const e = ex.expect || {};
+      const problems = [];
+      if (e.categories && !e.categories.includes(row.category)) problems.push({ key: `cls:${x.scenarioId}`, sev: 'errore', title: `${title}: categoria sbagliata`, detail: `«${row.category}» invece di ${e.categories.map(c => '«' + c + '»').join(' o ')}` });
+      if (e.tones && !e.tones.includes(row.tone)) problems.push({ key: `tone:${x.scenarioId}`, sev: 'errore', title: `${title}: tono sbagliato`, detail: `«${row.tone}» invece di ${e.tones.map(c => '«' + c + '»').join(' o ')}` });
+      if (e.discrepancy && !row.discrepancy) problems.push({ key: `disc:${x.scenarioId}`, sev: 'errore', title: `${title}: nessuna incongruenza segnalata`, detail: 'attesa una segnalazione' });
+      if (e.bodyNotEmpty) {
+        let body = '';
+        try { body = await fetchBody(token, x.id); } catch (err) { body = ''; }
+        if (!body || body === '(No body)') problems.push({ key: `body:${x.scenarioId}`, sev: 'errore', title: `${title}: testo della mail illeggibile`, detail: 'mostrato «(No body)»' });
+      }
+      const texts = responseTexts(row.responses);
+      (ex.responseChecks || []).forEach((rc, i) => {
+        if (!texts.length) return;
+        let bad, why = '';
+        if (rc.mustMatchAny) { const re = new RegExp(rc.mustMatchAny, rc.flags || ''); bad = !texts.some(t => re.test(t)); if (bad) why = 'assente in tutte le risposte'; }
+        else { const re = new RegExp(rc.mustNotMatch, rc.flags || ''); const hit = texts.map(t => t.match(re)).find(Boolean); bad = !!hit; if (bad) why = `«${hit[0]}»`; }
+        if (bad) problems.push({ key: `resp:${x.scenarioId}:${i}`, sev: rc.severity, title: `${title}: ${rc.label}`, detail: why });
+      });
+      x.result = { ok: problems.length === 0, category: row.category, tone: row.tone };
+      problems.forEach(pr => addIssue(st, pr.key, pr.sev, pr.title, pr.detail));
+    }
+  }
+
+  // Visibilità in dashboard: l'app è stata aperta DOPO l'arrivo e la mail non c'era in elenco?
+  const seen = (await stateGet(SEEN_KEY)) || { ids: {}, lastLoadAt: null };
+  const toCheck = inj.filter(x => !x.visChecked && (now - new Date(x.at)) >= 20 * 60000);
+  if (toCheck.length && seen.lastLoadAt) {
+    const r2 = await sb(`analyzed_emails?id=in.(${toCheck.map(x => x.id).join(',')})&select=id,resolved`);
+    const resolved = Object.fromEntries((r2.ok ? await r2.json() : []).map(x => [x.id, x.resolved]));
+    const titles = Object.fromEntries(emailScenarios(romeToday()).map(x => [x.id, x.title]));
+    for (const x of toCheck) {
+      const ageMin = (now - new Date(x.at)) / 60000;
+      if (seen.ids[x.id]) { x.visChecked = true; x.seenInDashboard = true; }
+      else if (new Date(seen.lastLoadAt) > new Date(new Date(x.at).getTime() + 3 * 60000)) {
+        x.visChecked = true;
+        if (!resolved[x.id]) {
+          x.missed = true;
+          addIssue(st, 'vis:dashboard', 'errore', 'Email di prova non comparsa nella dashboard', `${titles[x.scenarioId] || x.scenarioId}: l'app è stata aperta dopo l'arrivo ma la mail non era in elenco`);
+        }
+      } else if (ageMin > 48 * 60) x.visChecked = true;   // app mai aperta: non giudicabile
+    }
+  }
+}
+
+function summarize(st, seen) {
+  const now = new Date();
+  const inj = st.injected || [];
+  const analyzed = inj.filter(x => x.evaluated && !(x.result && x.result.notAnalyzed));
+  const correct = analyzed.filter(x => x.result && x.result.ok);
+  const mins = analyzed.map(x => x.analysisMin).filter(n => typeof n === 'number');
+  const dayOf = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date(iso));
+  const days = {};
+  inj.forEach(x => {
+    const d = days[dayOf(x.at)] = days[dayOf(x.at)] || { date: dayOf(x.at), injected: 0, analyzed: 0, correct: 0, notAnalyzed: 0, missed: 0 };
+    d.injected++;
+    if (x.evaluated) { if (x.result && x.result.notAnalyzed) d.notAnalyzed++; else { d.analyzed++; if (x.result && x.result.ok) d.correct++; } }
+    if (x.missed) d.missed++;
+  });
+  Object.entries((st.ticks && st.ticks.byDay) || {}).forEach(([date, v]) => { (days[date] = days[date] || { date, injected: 0, analyzed: 0, correct: 0, notAnalyzed: 0, missed: 0 }).maxGapMin = v.maxGapMin; });
+  const per = {};
+  analyzed.forEach(x => { const p = per[x.scenarioId] = per[x.scenarioId] || { id: x.scenarioId, n: 0, ok: 0 }; p.n++; if (x.result && x.result.ok) p.ok++; });
+  const day = Math.min(CAMPAIGN_DAYS, Math.floor((now - new Date(st.startedAt)) / 86400000) + 1);
+  return {
+    active: !!st.active, paused: !!st.paused, day, totalDays: CAMPAIGN_DAYS,
+    startedAt: st.startedAt, endsAt: st.endsAt, finishedAt: st.finishedAt, nextDueAt: st.nextDueAt,
+    injected: inj.length, analyzed: analyzed.length, correct: correct.length,
+    notAnalyzed: inj.filter(x => x.result && x.result.notAnalyzed).length,
+    missed: inj.filter(x => x.missed).length, seenInDashboard: inj.filter(x => x.seenInDashboard).length,
+    accuracyPct: analyzed.length ? Math.round(100 * correct.length / analyzed.length) : null,
+    avgAnalysisMin: mins.length ? Math.round(mins.reduce((a, b) => a + b, 0) / mins.length) : null,
+    ticks: { count: (st.ticks || {}).count || 0, last: (st.ticks || {}).last || null, maxGapMin: (st.ticks || {}).maxGapMin || 0 },
+    byDay: Object.values(days).sort((a, b) => a.date.localeCompare(b.date)),
+    perScenario: Object.values(per),
+    lastDashboardLoadAt: seen ? seen.lastLoadAt : null,
+    issues: Object.values(st.issues || {})
+  };
+}
+
+export async function runCampaignTick() {
+  const st = await stateGet(CAMPAIGN_KEY);
+  if (!st || !st.active) return { campaign: 'inattivo' };
+  const now = new Date();
+  const rp = romeInfo(now);
+
+  // battito del controllo automatico: quanto tempo passa tra un giro e l'altro?
+  st.ticks = st.ticks || { count: 0, last: null, maxGapMin: 0, byDay: {} };
+  const bd = st.ticks.byDay[rp.date] = st.ticks.byDay[rp.date] || { n: 0, maxGapMin: 0 };
+  if (st.ticks.last) {
+    const gap = Math.round((now - new Date(st.ticks.last)) / 60000);
+    if (gap > bd.maxGapMin) bd.maxGapMin = gap;
+    if (gap > st.ticks.maxGapMin) st.ticks.maxGapMin = gap;
+    if (gap > 30 && rp.hf >= 8 && rp.hf <= 22) addIssue(st, 'hb:gap', 'avviso', 'Il controllo automatico ogni 5 minuti ha saltato dei giri', `buco di ${gap} minuti`);
+  }
+  bd.n++; st.ticks.count++; st.ticks.last = now.toISOString();
+
+  if (st.paused) { await stateSet(CAMPAIGN_KEY, st); return { campaign: 'in pausa' }; }
+
+  if (now >= new Date(st.endsAt)) {
+    st.active = false; st.finishedAt = now.toISOString();
+    const sm = summarize(st, await stateGet(SEEN_KEY));
+    await stateSet(CAMPAIGN_KEY, st);
+    try { await sendPushToAll({ title: 'Collaudo di 7 giorni terminato', body: `${sm.injected} mail, ${sm.accuracyPct == null ? '—' : sm.accuracyPct + '%'} classificate bene. Apri il laboratorio per il report.`, url: '/' }); } catch (e) {}
+    return { campaign: 'terminato' };
+  }
+
+  let token, own;
+  try {
+    const rt = await sb('app_state?id=eq.gmail_refresh_token&select=value');
+    const rows = rt.ok ? await rt.json() : [];
+    if (!rows[0] || !rows[0].value) throw new Error('nessun token Gmail salvato');
+    token = await getFreshAccessToken(rows[0].value);
+    own = await getOwnEmail(token);
+    clearIssue(st, 'token');
+  } catch (e) {
+    addIssue(st, 'token', 'errore', 'Token Gmail non valido: il controllo automatico non può più leggere la posta', e.message, 60);
+    await stateSet(CAMPAIGN_KEY, st);
+    return { campaign: 'token non valido' };
+  }
+
+  await evaluatePending(st, token, now);
+
+  // una volta al giorno: controlli di sistema (variabili, tabelle, token), in un giro a parte per restare sotto i 10 secondi
+  if (st.diagDay !== rp.date && rp.hf >= 7) {
+    st.diagDay = rp.date;
+    const checks = await diag(token);
+    checks.forEach(c => { if (c.ok) clearIssue(st, 'diag:' + c.key); else addIssue(st, 'diag:' + c.key, c.severity, c.title, c.detail); });
+    await stateSet(CAMPAIGN_KEY, st);
+    return { campaign: 'controlli di sistema eseguiti', heavy: true };
+  }
+
+  // riepilogo serale con notifica
+  if (rp.hf >= ACTIVE_TO && rp.hf < 23 && st.summaryDay !== rp.date) {
+    st.summaryDay = rp.date;
+    const sm = summarize(st, await stateGet(SEEN_KEY));
+    const today = sm.byDay.find(d => d.date === rp.date) || { injected: 0, correct: 0, analyzed: 0 };
+    const open = sm.issues.filter(i => i.severity === 'errore').length;
+    try { await sendPushToAll({ title: `Collaudo, giorno ${sm.day} di ${sm.totalDays}`, body: `Oggi ${today.injected} mail, ${today.correct}/${today.analyzed} classificate bene. ${open ? open + ' problemi aperti.' : 'Nessun problema aperto.'}`, url: '/' }); } catch (e) {}
+  }
+
+  // nuove email di prova, solo nella fascia diurna
+  let injectedNow = 0;
+  if (rp.hf >= ACTIVE_FROM && rp.hf < ACTIVE_TO) {
+    const ready = (st.followUps || []).filter(f => now >= new Date(f.notBefore));
+    for (const f of ready) { await injectScenario(st, token, own, f.scenarioId, f.tag, now.toISOString()); injectedNow++; }
+    st.followUps = (st.followUps || []).filter(f => now < new Date(f.notBefore));
+    if (!st.nextDueAt || now >= new Date(st.nextDueAt)) {
+      await launchStoryline(st, token, own, now);
+      injectedNow++;
+      st.nextDueAt = new Date(now.getTime() + rnd(GAP_MIN, GAP_MAX) * 60000).toISOString();
+    }
+  }
+  await stateSet(CAMPAIGN_KEY, st);
+  return { campaign: 'attivo', injectedNow };
+}
+
 // ---------- handler ----------
 export default async function handler(req, res) {
   const refresh = req.cookies.gmail_refresh;
   if (!refresh) return res.status(401).json({ error: 'Non autenticato: accedi con Gmail' });
 
-  let token;
-  try {
-    token = await getFreshAccessToken(refresh);
-  } catch (err) {
-    return res.status(401).json({ error: err.code === 'REFRESH_EXPIRED' ? 'Sessione scaduta, riconnetti Gmail' : 'Errore nel rinnovo del token Gmail' });
-  }
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     return res.status(500).json({ error: 'Supabase non configurato' });
   }
 
   const action = req.query.action;
+  // Il token Gmail serve solo alle azioni che parlano con Gmail. Report, registro e reset
+  // devono funzionare anche quando il token è scaduto: è proprio allora che servono.
+  const needsGmail = ['status', 'seed-emails', 'cleanup', 'diag', 'campaign-start'].includes(action);
+  const partialOk = ['status', 'cleanup', 'diag'].includes(action);
+  let token = null, own = null, gmailError = null;
+  if (needsGmail) {
+    try {
+      token = await getFreshAccessToken(refresh);
+      own = await getOwnEmail(token);
+    } catch (err) {
+      token = null; own = null;
+      gmailError = err.code === 'REFRESH_EXPIRED' ? 'Sessione Gmail scaduta: riconnetti Gmail' : ('Gmail non raggiungibile: ' + err.message);
+      if (!partialOk) return res.status(401).json({ error: gmailError });
+    }
+  }
+
   try {
-    const own = await getOwnEmail(token);
-    if (action === 'status' && req.method === 'GET') return res.status(200).json(await status(token, own));
+    if (action === 'status' && req.method === 'GET') return res.status(200).json(await status(token, own, gmailError));
     if (action === 'seed-emails' && req.method === 'POST') return res.status(200).json(await seedEmails(token, own, (req.body || {}).batch));
     if (action === 'seed-bookings' && req.method === 'POST') return res.status(200).json(await seedBookings(own));
     if (action === 'cleanup' && req.method === 'POST') return res.status(200).json(await cleanup(token, own));
-    if (action === 'diag' && req.method === 'GET') return res.status(200).json({ checks: await diag(token) });
+    if (action === 'campaign-get' && req.method === 'GET') {
+      const st = await stateGet(CAMPAIGN_KEY);
+      const seen = await stateGet(SEEN_KEY);
+      return res.status(200).json({ campaign: st ? summarize(st, seen) : null });
+    }
+    if (action === 'campaign-start' && req.method === 'POST') {
+      const st = newCampaign();
+      await launchStoryline(st, token, own, new Date());        // la prima email arriva subito
+      st.nextDueAt = new Date(Date.now() + rnd(GAP_MIN, GAP_MAX) * 60000).toISOString();
+      await stateSet(CAMPAIGN_KEY, st);
+      await stateSet(SEEN_KEY, { ids: {}, lastLoadAt: null });
+      return res.status(200).json({ campaign: summarize(st, null) });
+    }
+    if ((action === 'campaign-toggle' || action === 'campaign-stop') && req.method === 'POST') {
+      const st = await stateGet(CAMPAIGN_KEY);
+      if (!st) return res.status(404).json({ error: 'Nessun collaudo in corso' });
+      if (action === 'campaign-toggle') st.paused = !st.paused;
+      else { st.active = false; st.finishedAt = new Date().toISOString(); }
+      await stateSet(CAMPAIGN_KEY, st);
+      return res.status(200).json({ campaign: summarize(st, await stateGet(SEEN_KEY)) });
+    }
+    if (action === 'campaign-seen' && req.method === 'POST') {
+      // l'app dice quali email di prova ha appena mostrato in dashboard (anche nessuna: serve a sapere che è stata aperta)
+      const ids = ((req.body || {}).ids || []).filter(x => typeof x === 'string').slice(0, 100);
+      const seen = (await stateGet(SEEN_KEY)) || { ids: {}, lastLoadAt: null };
+      const nowIso = new Date().toISOString();
+      ids.forEach(id => { if (!seen.ids[id]) seen.ids[id] = nowIso; });
+      seen.lastLoadAt = nowIso;
+      const keys = Object.keys(seen.ids);
+      if (keys.length > 400) keys.sort((a, b) => seen.ids[a].localeCompare(seen.ids[b])).slice(0, keys.length - 400).forEach(k => delete seen.ids[k]);
+      await stateSet(SEEN_KEY, seen);
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'diag' && req.method === 'GET') return res.status(200).json({ checks: await diag(token, gmailError) });
     if (action === 'log-get' && req.method === 'GET') {
       const saved = await stateGet(SESSION_KEY);
       const history = (await stateGet(HISTORY_KEY)) || [];
