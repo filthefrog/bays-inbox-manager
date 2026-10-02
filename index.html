@@ -549,6 +549,7 @@ class ACME {
     this.reminders = { cleanerPending: [], paymentPending: [] };
     this.testLab = { data: null, loading: false, busy: null, message: null, error: null };
     this.testSession = null;
+    this.campaign = null;
     this.testReport = null;
     this.testHistory = null;
     this.testHistoryCount = 0;
@@ -745,6 +746,129 @@ class ACME {
   }
 
   // ---------- Laboratorio di test ----------
+  freshTestSession() {
+    return { startedAt: new Date().toISOString(), results: {}, seeded: {}, bookingsSeeded: false, findings: [], autoResults: [], autoRunAt: null };
+  }
+
+  // ---------- collaudo automatico di 7 giorni ----------
+  async loadCampaign() {
+    try {
+      const res = await fetch('/api/test-lab?action=campaign-get');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      this.campaign = data.campaign;
+      if (data.campaign && data.campaign.active) localStorage.setItem('acme_campaign', '1');
+      else localStorage.removeItem('acme_campaign');
+    } catch (e) {}
+  }
+
+  async campaignAction(action, busyLabel, doneMsg) {
+    const t = this.testLab;
+    t.busy = busyLabel;
+    t.message = null;
+    t.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/test-lab?action=' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Operazione fallita');
+      this.campaign = data.campaign;
+      if (this.campaign && this.campaign.active) localStorage.setItem('acme_campaign', '1');
+      else localStorage.removeItem('acme_campaign');
+      t.message = doneMsg(data.campaign);
+      if (action === 'campaign-start') {
+        // la prima email è già arrivata: la mostro subito nella dashboard e dico com'è andata
+        const ib = await this.refreshInboxQuiet();
+        t.message += ib.ok ? ` La dashboard ora mostra ${ib.seen} email di prova.` : ` ⚠️ La dashboard non si è aggiornata: ${ib.error}`;
+      }
+    } catch (e) {
+      t.error = e.message;
+    }
+    t.busy = null;
+    this.render();
+  }
+
+  confirmCampaignStart() {
+    this.showConfirmDialog({
+      title: 'Avviare il collaudo di 7 giorni?',
+      desc: 'La prima email di prova arriva subito, poi circa 5-6 al giorno tra le 8:30 e le 21:30, per 7 giorni. Controlla da solo se le classifica bene e se compaiono in dashboard; ogni sera ti arriva una notifica. Puoi fermarlo e azzerare tutto quando vuoi.',
+      confirmLabel: 'Avvia',
+      confirmColor: 'var(--accent)',
+      icon: '🗓️',
+      onConfirm: () => this.campaignAction('campaign-start', 'Avvio del collaudo…', c => `Collaudo avviato: giorno 1 di ${c.totalDays}. La prima email è già arrivata.`)
+    });
+  }
+
+  confirmCampaignStop() {
+    this.showConfirmDialog({
+      title: 'Terminare il collaudo?',
+      desc: 'Le email di prova non arrivano più. I risultati raccolti restano nel report finché non fai il reset.',
+      confirmLabel: 'Termina',
+      icon: '⏹️',
+      onConfirm: () => this.campaignAction('campaign-stop', 'Chiusura…', () => 'Collaudo terminato. Genera il report per vedere i risultati.')
+    });
+  }
+
+  // La dashboard dice al collaudo quali email di prova ha mostrato (anche nessuna: serve a sapere
+  // che l'app è stata aperta). Se una mail arrivata prima non c'era, viene registrata come errore.
+  reportCampaignSeen() {
+    if (localStorage.getItem('acme_campaign') !== '1') return;
+    const ids = Object.values(this.byCategory || {}).flat().filter(e => this.isTestAddr(e.from)).map(e => e.id).filter(Boolean);
+    fetch('/api/test-lab?action=campaign-seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }).catch(() => {});
+  }
+
+  renderCampaignCard() {
+    const c = this.campaign;
+    const busy = !!this.testLab.busy;
+    const hm = (iso) => iso ? new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '—';
+    const dt = (iso) => iso ? new Date(iso).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+    if (!c) {
+      return `
+        <div class="detail-card">
+          <div class="section-title" style="margin:0 0 8px;">🗓️ Collaudo di 7 giorni</div>
+          <div style="font-size:13px; color:var(--text-secondary); line-height:1.5;">Per una settimana l'app riceve da sola email di prova a intervalli diversi durante il giorno (circa 5-6 al giorno). Controlla in automatico se le classifica bene, se compaiono in dashboard e se il controllo ogni 5 minuti gira senza saltare giri. Ogni sera ti arriva una notifica e alla fine il report.</div>
+          <button class="btn btn-send" style="width:100%; margin-top:12px;" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStart()">▶️ Avvia il collaudo di 7 giorni</button>
+        </div>`;
+    }
+    const state = !c.active ? (c.finishedAt ? 'terminato' : 'fermo') : (c.paused ? 'in pausa' : 'attivo');
+    const errors = (c.issues || []).filter(i => i.severity === 'errore').length;
+    const warns = (c.issues || []).filter(i => i.severity !== 'errore').length;
+    const days = (c.byDay || []).map(d => `
+      <div class="test-auto" style="color:var(--text);">${new Date(d.date + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}: ${d.injected} mail, ${d.correct}/${d.analyzed} giuste${d.missed ? ', ' + d.missed + ' non viste in dashboard' : ''}${d.maxGapMin > 30 ? ', ⚠️ buco del cron ' + d.maxGapMin + ' min' : ''}</div>`).join('');
+    return `
+      <div class="detail-card">
+        <div class="row-top"><div class="section-title" style="margin:0;">🗓️ Collaudo di 7 giorni</div><span class="chip ${c.active && !c.paused ? 'chip-pay-saldata' : 'chip-code'}">${state}</span></div>
+        <div style="font-size:22px; font-weight:700; margin:10px 0 2px;">Giorno ${c.day} di ${c.totalDays}</div>
+        <div style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
+          ${c.injected} email inserite · ${c.analyzed} analizzate · <b style="color:var(--text);">${c.correct} classificate bene${c.accuracyPct != null ? ' (' + c.accuracyPct + '%)' : ''}</b><br>
+          Compaiono in dashboard: ${c.seenInDashboard} · <b style="color:${c.missed ? 'var(--red)' : 'var(--text)'};">non viste: ${c.missed}</b>${c.notAnalyzed ? ' · mai analizzate: ' + c.notAnalyzed : ''}<br>
+          Controllo automatico: ${c.ticks.count} giri, ultimo alle ${hm(c.ticks.last)}, buco massimo ${c.ticks.maxGapMin} min${c.avgAnalysisMin != null ? '<br>Ritardo medio di analisi: ' + c.avgAnalysisMin + ' min' : ''}
+          ${c.active && !c.paused ? '<br>Prossima email: intorno alle ' + hm(c.nextDueAt) : ''}
+          ${c.lastDashboardLoadAt ? '<br>Ultima apertura della dashboard: ' + dt(c.lastDashboardLoadAt) : '<br>⚠️ La dashboard non ha ancora comunicato di essere stata aperta'}
+        </div>
+        <div style="font-size:13px; margin-top:8px;">${errors} errori, ${warns} avvisi rilevati dal collaudo</div>
+        ${days ? '<details class="test-details"><summary>Giorno per giorno</summary>' + days + '</details>' : ''}
+        <div class="btn-row" style="margin-top:12px;">
+          ${c.active ? `<button class="btn btn-secondary" ${busy ? 'disabled' : ''} onclick="app.campaignAction('campaign-toggle', 'Attendi…', x => x.paused ? 'Collaudo in pausa.' : 'Collaudo ripreso.')">${c.paused ? '▶️ Riprendi' : '⏸ Pausa'}</button>
+          <button class="btn btn-reject" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStop()">⏹ Termina</button>` : `<button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStart()">▶️ Nuovo collaudo</button>`}
+        </div>
+      </div>`;
+  }
+
+  // Un indirizzo è «di prova» se contiene acmetest (nuovi: nome@acmetest.example.com,
+  // vecchi: tuamail+acmetest.nome@…). Verso i nuovi l'app NON scrive mai davvero:
+  // tutto viene deviato sulla tua casella (tuamail+acmetest.reply@…).
+  isTestAddr(a) { return (a || '').includes('acmetest'); }
+
+  testReplyTarget() { return localStorage.getItem('acme_test_reply') || null; }
+
+  redirectIfTest(to) {
+    if (!(to || '').includes('@acmetest.example.com')) return to;
+    const target = this.testReplyTarget();
+    if (!target) throw new Error('Per scrivere ai finti ospiti apri prima una volta il Laboratorio di test (Impostazioni).');
+    return target;
+  }
+
   isStandalone() {
     return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
   }
@@ -754,7 +878,7 @@ class ACME {
     this.testLab.message = null;
     this.testLab.error = null;
     this.render();
-    await Promise.all([this.loadTestLab(), this.loadTestSession()]);
+    await Promise.all([this.loadTestLab(), this.loadTestSession(), this.loadCampaign()]);
     this.render();
   }
 
@@ -766,6 +890,7 @@ class ACME {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || data.error || 'Errore nel caricamento');
       this.testLab.data = data;
+      if (data.replyAddress) localStorage.setItem('acme_test_reply', data.replyAddress);
     } catch (e) {
       this.testLab.error = e.message;
     }
@@ -860,8 +985,10 @@ class ACME {
         if (action === 'seed-emails') (data.scenarioIds || []).forEach(id => { s.seeded[id] = new Date().toISOString(); });
         if (action === 'seed-bookings') s.bookingsSeeded = true;
         if (action === 'cleanup') {
-          s.seeded = {}; s.bookingsSeeded = false; s.autoResults = [];
-          s.findings = s.findings.filter(f => f.source !== 'auto');
+          // reset totale: prove, segnalazioni, collaudo. Restano solo i report già salvati nello storico.
+          this.testSession = this.freshTestSession();
+          this.campaign = null;
+          localStorage.removeItem('acme_campaign');
         }
         await this.saveTestSession();
       }
@@ -896,7 +1023,7 @@ class ACME {
       this.byCategory = data.byCategory || {};
       this.lastUpdated = new Date();
       out.ok = true;
-      out.seen = Object.values(this.byCategory).flat().filter(e => (e.from || '').includes('+acmetest')).length;
+      out.seen = Object.values(this.byCategory).flat().filter(e => this.isTestAddr(e.from)).length;
     } catch (e) {
       out.error = e.message;
     }
@@ -990,7 +1117,7 @@ class ACME {
     };
     const iso = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
     const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
-    const testMail = d.ownEmail.replace('@', '+acmetest.autotest@');
+    const testMail = (d.ownEmail || 'autotest@example.com').replace('@', '+acmetest.autotest@');
     let rm = null, nr = null;
 
     try {
@@ -1084,7 +1211,7 @@ class ACME {
       const norm = (r) => (r && typeof r === 'object') ? (r.text || '') : (r || '');
       for (const sc of d.scenarios) {
         if (!s.seeded[sc.id]) continue;
-        const e = allMails.find(x => (x.from || '').includes('+acmetest.' + sc.tag) && (x.subject || '').startsWith(sc.subjectPrefix || ''));
+        const e = allMails.find(x => ((x.from || '').includes(sc.tag + '@' + (d.testDomain || 'acmetest.example.com')) || (x.from || '').includes('+acmetest.' + sc.tag + '@')) && (x.subject || '').startsWith(sc.subjectPrefix || ''));
         if (!e) {
           check('cls:' + sc.id, 'Email', sc.title, false, 'Inserita ma non compare tra le mail analizzate (limite delle 8 mail più recenti, timeout o errore di analisi)', 'errore', sc.id);
           continue;
@@ -1201,6 +1328,17 @@ class ACME {
         count: f.count, lastAt: f.lastAt, context: f.context, key: f.key, removable: f.source !== 'auto', details: []
       });
     });
+    // problemi trovati dal collaudo automatico di 7 giorni
+    if (this.campaign && this.campaign.issues) {
+      this.campaign.issues.forEach(i => {
+        const sid = (i.key || '').split(':')[1];
+        issues.push({
+          sev: i.severity, origin: `collaudo automatico, ${i.count} ${i.count === 1 ? 'volta' : 'volte'}`,
+          title: i.title, detail: (i.examples || []).join(' · '), scenario: byId[sid] || null,
+          count: i.count, lastAt: i.lastAt, removable: false, details: []
+        });
+      });
+    }
     issues.sort((a, b) => (a.sev === 'errore' ? 0 : 1) - (b.sev === 'errore' ? 0 : 1));
     return issues;
   }
@@ -1235,6 +1373,31 @@ class ACME {
     L.push(`- Problemi aperti: ${sum.errors} errori, ${sum.warnings} avvisi`);
     L.push(`- Controlli automatici: ${s.autoRunAt ? `ultima esecuzione ${fmt(s.autoRunAt)}, ${s.autoResults.filter(r => r.ok).length}/${s.autoResults.length} superati` : 'mai eseguiti'}`);
     L.push('');
+    const c = this.campaign;
+    if (c) {
+      const day = (iso) => iso ? new Date(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : '—';
+      const titleOf = Object.fromEntries(d.scenarios.map(x => [x.id, x.title]));
+      L.push('## Collaudo automatico di 7 giorni');
+      L.push(`- Stato: ${c.active ? (c.paused ? 'in pausa' : 'in corso') : 'terminato'}, giorno ${c.day} di ${c.totalDays} (dal ${day(c.startedAt)} al ${day(c.finishedAt || c.endsAt)})`);
+      L.push(`- Email inserite: ${c.injected} · analizzate: ${c.analyzed} · classificate bene: ${c.correct}${c.accuracyPct != null ? ' (' + c.accuracyPct + '%)' : ''} · mai analizzate: ${c.notAnalyzed}`);
+      L.push(`- Comparse in dashboard: ${c.seenInDashboard} · non viste (app aperta dopo l'arrivo, mail assente): ${c.missed}`);
+      L.push(`- Ritardo medio tra arrivo e analisi: ${c.avgAnalysisMin != null ? c.avgAnalysisMin + ' minuti (misurato a scatti di 5)' : 'n.d.'}`);
+      L.push(`- Controllo automatico ogni 5 minuti: ${c.ticks.count} giri, buco massimo ${c.ticks.maxGapMin} minuti`);
+      L.push(`- Ultima apertura della dashboard registrata: ${c.lastDashboardLoadAt ? fmt(c.lastDashboardLoadAt) : 'mai'}`);
+      if ((c.byDay || []).length) {
+        L.push('');
+        L.push('| Giorno | Inserite | Giuste | Non analizzate | Non viste | Buco cron max |');
+        L.push('|---|---|---|---|---|---|');
+        c.byDay.forEach(x => L.push(`| ${day(x.date)} | ${x.injected} | ${x.correct}/${x.analyzed} | ${x.notAnalyzed} | ${x.missed} | ${x.maxGapMin != null ? x.maxGapMin + ' min' : '—'} |`));
+      }
+      if ((c.perScenario || []).length) {
+        L.push('');
+        L.push('| Tipo di email | Prove | Giuste |');
+        L.push('|---|---|---|');
+        c.perScenario.forEach(x => L.push(`| ${titleOf[x.id] || x.id} | ${x.n} | ${x.ok} |`));
+      }
+      L.push('');
+    }
     L.push('## Problemi da correggere');
     if (!issues.length) L.push('Nessun problema aperto.');
     issues.forEach((it, i) => {
@@ -1292,6 +1455,7 @@ class ACME {
 
   async previewTestReport() {
     await this.flushErrorBuffer();
+    await this.loadCampaign();
     this.testReport = { text: this.buildTestReport(), closed: false };
     this.render();
   }
@@ -1313,6 +1477,7 @@ class ACME {
     this.render();
     try {
       await this.flushErrorBuffer();
+      await this.loadCampaign();
       const text = this.buildTestReport();
       const summary = this.testSummary();
       const res = await fetch('/api/test-lab?action=log-close', {
@@ -1387,11 +1552,11 @@ class ACME {
 
   confirmTestCleanup() {
     this.showConfirmDialog({
-      title: 'Eliminare tutti i dati di test?',
-      desc: 'Manda nel cestino Gmail le email di prova e cancella prenotazioni, preventivi e analisi legati agli indirizzi di test. I dati veri non vengono toccati. Il registro delle prove resta.',
-      confirmLabel: 'Elimina',
-      onConfirm: () => this.testLabAction('cleanup', {}, 'Pulizia in corso…',
-        d => `Eliminate ${d.trashed} email, ${d.bookings} prenotazioni e ${d.quotes} preventivi di test.`)
+      title: 'Reset totale del collaudo?',
+      desc: 'Manda nel cestino Gmail le email di prova, cancella prenotazioni, preventivi e analisi di test, ferma e azzera il collaudo automatico e riparte da zero con le prove. I dati veri e i report già salvati non vengono toccati.',
+      confirmLabel: 'Azzera tutto',
+      onConfirm: () => this.testLabAction('cleanup', {}, 'Reset in corso…',
+        d => `Reset fatto: ${d.trashed} email, ${d.bookings} prenotazioni e ${d.quotes} preventivi di test eliminati; collaudo azzerato.` + (d.gmailSkipped ? ' ⚠️ Gmail non era raggiungibile: le email di prova restano nella posta. Riconnetti Gmail e ripeti il reset per toglierle.' : ''))
     });
   }
 
@@ -1460,11 +1625,12 @@ class ACME {
     return `${head}
       ${t.message ? `<div class="sent-confirm" style="margin:0 0 16px;">${this.escape(t.message)}</div>` : ''}
       ${t.error ? `<div class="error-banner">${this.escape(t.error)}</div>` : ''}
-      ${!d.scopeOk ? `<div class="discrepancy-banner">Serve un permesso Gmail in più per inserire le email di prova.<button class="btn btn-primary" style="margin-top:10px;" onclick="app.reconnectGmail()">Riconnetti Gmail</button></div>` : ''}
+      ${d.gmailError ? `<div class="error-banner">${this.escape(d.gmailError)}. Report, registro e reset funzionano lo stesso; per inserire email di prova serve riconnettere Gmail.<button class="btn btn-primary" style="margin-top:10px;" onclick="app.reconnectGmail()">Riconnetti Gmail</button></div>` : ''}
+      ${!d.scopeOk && !d.gmailError ? `<div class="discrepancy-banner">Serve un permesso Gmail in più per inserire le email di prova.<button class="btn btn-primary" style="margin-top:10px;" onclick="app.reconnectGmail()">Riconnetti Gmail</button></div>` : ''}
       ${reportPanel}
 
       <div class="detail-card" style="font-size:13px; line-height:1.5; color:var(--text-secondary);">
-        Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi tipo <b>${this.escape(d.ownEmail.replace('@', '+acmetest.nome@'))}</b>: Gmail li recapita a te, quindi risposte e preventivi tornano nella tua inbox e non escono verso nessun altro. Tocca il cerchio di una prova per segnarla ✅ o ❌ (con ❌ puoi scrivere cosa è successo). Tutto resta salvato anche per giorni.
+        Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi tipo <b>marco@acmetest.example.com</b>, un dominio riservato che non esiste: nessuna persona reale può riceverli. Risposte e preventivi che l'app «invia» a loro vengono deviati nella tua inbox. Tocca il cerchio di una prova per segnarla ✅ o ❌ (con ❌ puoi scrivere cosa è successo). Tutto resta salvato anche per giorni.
       </div>
 
       <div class="detail-card" style="text-align:center;">
@@ -1472,13 +1638,7 @@ class ACME {
         <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Sessione aperta da ${days} giorni · ${sum.errors} errori, ${sum.warnings} avvisi · ora presenti: ${d.counts.emails} email e ${d.counts.bookings} prenotazioni di test</div>
       </div>
 
-      <button class="btn btn-primary" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.runAutoChecks()">${t.busy && t.busy.startsWith('Controlli') ? t.busy : '🤖 Esegui i controlli automatici'}</button>
-      ${autos.length ? `
-        <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 8px;">Ultima esecuzione: ${new Date(s.autoRunAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })} · ${autoPass.length}/${autos.length} superati</div>
-        ${autoFails.map(a => `<div class="booking-row" style="padding-right:16px;"><div class="name">${a.severity === 'errore' ? '❌' : '⚠️'} ${this.escape(a.title)}</div><div class="rate-info">${this.escape(a.group)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div></div>`).join('')}
-        <details class="test-details"><summary>${autoPass.length} controlli superati</summary>
-          ${autoPass.map(a => `<div class="test-auto ok">✓ ${this.escape(a.title)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div>`).join('')}
-        </details>` : ''}
+      ${this.renderCampaignCard()}
 
       <div class="section-title">Problemi aperti (${issues.length})</div>
       ${issues.length ? issues.map(it => `
@@ -1495,26 +1655,39 @@ class ACME {
       <button class="btn btn-send" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmCloseTestSession()">${t.busy === 'Genero il report…' ? t.busy : '✅ Chiudi la sessione e genera il report'}</button>
       <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Il report elenca solo cosa non va, con il contesto per correggerlo: condividilo come file o copialo e incollalo nella chat con Claude.</div>
 
-      <div class="section-title">1 · Email di prova</div>
-      <div class="btn-row" style="margin-bottom:12px;">
-        <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'A'}, 'Inserisco le email…', (r, ib) => app.seedMessage(r, ib))">${t.busy && t.busy.startsWith('Inserisco') ? t.busy : 'Inserisci gruppo A (' + groupA.length + ')'}</button>
-        <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'B'}, 'Inserisco le email…', (r, ib) => app.seedMessage(r, ib))">${t.busy && t.busy.startsWith('Inserisco') ? t.busy : 'Inserisci gruppo B (' + groupB.length + ')'}</button>
-      </div>
-      <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 12px;">Due gruppi perché la dashboard legge le ultime mail della inbox: inserirle tutte insieme ne nasconderebbe alcune. Se l'analisi va in timeout, usa «Inserisci solo questa».</div>
-      <div class="section-title">Gruppo A — flusso prenotazione</div>
-      ${groupA.map(x => card(x, true)).join('')}
-      <div class="section-title">Gruppo B — casi difficili</div>
-      ${groupB.map(x => card(x, true)).join('')}
+      <button class="btn btn-reject" style="width:100%; margin-top:16px;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">🗑️ Reset totale</button>
+      <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 16px;">Da fare prima di usare l'app sul serio: toglie ogni traccia di test (email, prenotazioni, collaudo) così statistiche e promemoria partono puliti.</div>
 
-      <div class="section-title">2 · Prenotazioni di test</div>
-      <button class="btn btn-send" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-bookings', {}, 'Creo le prenotazioni…', r => r.inserted + ' prenotazioni di test create.')">${t.busy && t.busy.startsWith('Creo') ? t.busy : 'Crea ' + bookingTotal + ' prenotazioni di test'}</button>
-      ${d.bookingScenarios.map(x => card(x, false)).join('')}
+      <details class="test-details" style="margin-top:8px;">
+        <summary style="font-size:14px; font-weight:600; padding:10px 4px; cursor:pointer;">🔧 Strumenti manuali e avanzati</summary>
+        <div style="margin-top:12px;">
 
-      ${historyPanel}
+          <button class="btn btn-primary" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.runAutoChecks()">${t.busy && t.busy.startsWith('Controlli') ? t.busy : '🤖 Esegui i controlli automatici'}</button>
+          ${autos.length ? `
+            <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 8px;">Ultima esecuzione: ${new Date(s.autoRunAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })} · ${autoPass.length}/${autos.length} superati</div>
+            ${autoFails.map(a => `<div class="booking-row" style="padding-right:16px;"><div class="name">${a.severity === 'errore' ? '❌' : '⚠️'} ${this.escape(a.title)}</div><div class="rate-info">${this.escape(a.group)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div></div>`).join('')}
+            <details class="test-details"><summary>${autoPass.length} controlli superati</summary>
+              ${autoPass.map(a => `<div class="test-auto ok">✓ ${this.escape(a.title)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div>`).join('')}
+            </details>` : ''}
 
-      <div class="section-title">Pulizia</div>
-      <button class="btn btn-reject" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">🗑️ Elimina tutti i dati di test</button>
-      <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Da fare prima di usare l'app sul serio, così statistiche e promemoria partono puliti.</div>`;
+          <div class="section-title">1 · Email di prova (inserimento manuale)</div>
+          <div class="btn-row" style="margin-bottom:12px;">
+            <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'A'}, 'Inserisco le email…', (r, ib) => app.seedMessage(r, ib))">${t.busy && t.busy.startsWith('Inserisco') ? t.busy : 'Inserisci gruppo A (' + groupA.length + ')'}</button>
+            <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'B'}, 'Inserisco le email…', (r, ib) => app.seedMessage(r, ib))">${t.busy && t.busy.startsWith('Inserisco') ? t.busy : 'Inserisci gruppo B (' + groupB.length + ')'}</button>
+          </div>
+          <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 12px;">Di solito non serve: ci pensa la campagna automatica qui sopra. Usa questo solo per provare subito uno scenario preciso. Se l'analisi va in timeout, usa «Inserisci solo questa».</div>
+          <div class="section-title">Gruppo A — flusso prenotazione</div>
+          ${groupA.map(x => card(x, true)).join('')}
+          <div class="section-title">Gruppo B — casi difficili</div>
+          ${groupB.map(x => card(x, true)).join('')}
+
+          <div class="section-title">2 · Prenotazioni di test</div>
+          <button class="btn btn-send" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-bookings', {}, 'Creo le prenotazioni…', r => r.inserted + ' prenotazioni di test create.')">${t.busy && t.busy.startsWith('Creo') ? t.busy : 'Crea ' + bookingTotal + ' prenotazioni di test'}</button>
+          ${d.bookingScenarios.map(x => card(x, false)).join('')}
+
+          ${historyPanel}
+        </div>
+      </details>`;
   }
 
   openReminders() {
@@ -1770,6 +1943,7 @@ class ACME {
       const data = await res.json();
       this.byCategory = data.byCategory || {};
       this.lastUpdated = new Date();
+      this.reportCampaignSeen();
       if (this.view === 'dashboard') this.render();
     } catch (e) {}
     this.loadReminders();
@@ -1799,6 +1973,7 @@ class ACME {
       this.byCategory = data.byCategory || {};
       this.lastUpdated = new Date();
       this.view = 'dashboard';
+      this.reportCampaignSeen();
     } catch (e) {
       this.error = e.message;
       this.view = 'dashboard';
@@ -1863,7 +2038,16 @@ class ACME {
     const respItem = email.responses[idx];
     const resp = (respItem && typeof respItem === 'object') ? respItem.text : respItem;
     const to = (email.from.match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || '';
-    const subject = 'RE: ' + email.subject;
+    let subject = 'RE: ' + email.subject;
+    let deliverTo;
+    try {
+      deliverTo = this.redirectIfTest(to);
+    } catch (e) {
+      this.error = e.message;
+      this.render();
+      return;
+    }
+    if (deliverTo !== to) subject = `[TEST per ${to}] ` + subject;
     this.sendingIdx = idx;
     this.error = null;
     this.render();
@@ -1871,7 +2055,7 @@ class ACME {
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, subject, body: resp })
+        body: JSON.stringify({ to: deliverTo, subject, body: resp })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -2154,14 +2338,15 @@ class ACME {
   // la stessa stanza appena liberata).
   async notifyCleaningLady(booking) {
     try {
-      // Prenotazioni di test (indirizzo +acmetest): la mail NON va alla colf vera,
+      // Prenotazioni di test (indirizzo acmetest): la mail NON va alla colf vera,
       // ma alla tua casella, così vedi cosa riceverebbe senza disturbare nessuno.
-      const isTest = (booking.guest_email || '').includes('+acmetest');
+      const isTest = this.isTestAddr(booking.guest_email);
       const settingsRes = await fetch('/api/auth?action=get-cleaner-email');
       const settingsData = await settingsRes.json().catch(() => ({}));
       const cleanerEmail = settingsData.cleanerEmail;
       if (!cleanerEmail && !isTest) return;
-      const recipient = isTest ? booking.guest_email.replace(/\+[^@]*@/, '@') : cleanerEmail;
+      const recipient = isTest ? this.testReplyTarget() : cleanerEmail;
+      if (!recipient) return;   // per i test senza indirizzo di deviazione: meglio non inviare niente che scrivere alla colf vera
 
       const nextRes = await fetch('/api/booking?nextCheckinAfter=' + encodeURIComponent(booking.check_out));
       const nextData = await nextRes.json().catch(() => ({}));
@@ -2645,6 +2830,14 @@ Domus 106`;
       this.render();
       return;
     }
+    let deliverTo;
+    try {
+      deliverTo = this.redirectIfTest(to);
+    } catch (e) {
+      this.error = e.message;
+      this.render();
+      return;
+    }
     qs.sending = true;
     this.error = null;
     this.render();
@@ -2652,7 +2845,7 @@ Domus 106`;
       const res = await fetch('/api/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', to, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage })
+        body: JSON.stringify({ action: 'send', to: deliverTo, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -3043,7 +3236,7 @@ Domus 106`;
           </div>
           <div class="subject">${this.escape(e.subject)}</div>
           <div class="preview">${this.escape(e.body)}</div>
-          <div class="ready-badge">● Risposte pronte</div>${e.from.includes('+acmetest') ? ' <span class="chip chip-code" style="margin-left:6px;">🧪 test</span>' : ''}
+          <div class="ready-badge">● Risposte pronte</div>${this.isTestAddr(e.from) ? ' <span class="chip chip-code" style="margin-left:6px;">🧪 test</span>' : ''}
         </div>`;
     }).join('')
       : `<div class="empty">Nessuna email qui — persino Willy il Coyote ogni tanto si ferma a riprendere fiato</div>`;
@@ -3311,7 +3504,7 @@ Domus 106`;
             <span class="chip ${statusClass}">${this.escape(status)}</span>
             <span class="chip ${paymentClass}">${paymentLabel}</span>
             ${b.guests ? `<span class="chip chip-guests">👤 ${b.guests}</span>` : ''}
-            ${(b.guest_email || '').includes('+acmetest') ? '<span class="chip chip-code">🧪 test</span>' : ''}
+            ${this.isTestAddr(b.guest_email) ? '<span class="chip chip-code">🧪 test</span>' : ''}
             <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
           </div>
         </div>`;
