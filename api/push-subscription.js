@@ -1,9 +1,14 @@
 // Un solo endpoint per salvare O rimuovere l'iscrizione alle notifiche push,
 // così da avere una funzione in meno (limite di 12 funzioni sul piano gratuito Vercel).
+import { requireAuth } from '../lib/auth.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // Senza login chiunque potrebbe iscriversi e ricevere le notifiche (che
+  // contengono mittente e oggetto delle email degli ospiti).
+  if (!(await requireAuth(req, res))) return;
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;

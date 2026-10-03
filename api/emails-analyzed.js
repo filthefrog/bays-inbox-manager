@@ -90,6 +90,10 @@ export default async function handler(req, res) {
         const headers = detail.payload.headers;
         return {
           id,
+          threadId: detail.threadId || null,
+          // Message-ID originale: serve a far arrivare la risposta nella stessa
+          // conversazione dell'ospite (intestazioni In-Reply-To/References)
+          messageId: headers.find(h => h.name.toLowerCase() === "message-id")?.value || null,
           from: headers.find(h => h.name === "From")?.value || "Unknown",
           subject: headers.find(h => h.name === "Subject")?.value || "(No subject)",
           date: headers.find(h => h.name === "Date")?.value || "",

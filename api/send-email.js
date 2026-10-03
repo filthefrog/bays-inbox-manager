@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const { to, subject, body } = req.body;
+  const { to, subject, body, threadId, inReplyTo } = req.body;
 
   if (!to || !subject || !body) {
     return res.status(400).json({ error: 'Missing fields' });
@@ -31,9 +31,14 @@ export default async function handler(req, res) {
     const encodedSubject = '=?UTF-8?B?' + Buffer.from(subject, 'utf-8').toString('base64') + '?=';
 
     // Crea il messaggio email
+    // Con In-Reply-To/References e il threadId di Gmail la risposta resta nella
+    // stessa conversazione, sia da noi sia nella casella dell'ospite. Solo un
+    // Message-ID ben formato, senza a capo, finisce nelle intestazioni.
+    const replyRef = typeof inReplyTo === 'string' && /^<[^<>\r\n]+>$/.test(inReplyTo.trim()) ? inReplyTo.trim() : null;
     const message = [
       `To: ${to}`,
       `Subject: ${encodedSubject}`,
+      ...(replyRef ? [`In-Reply-To: ${replyRef}`, `References: ${replyRef}`] : []),
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset="UTF-8"',
       'Content-Transfer-Encoding: base64',
@@ -53,9 +58,7 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          raw: encodedMessage
-        })
+        body: JSON.stringify(threadId ? { raw: encodedMessage, threadId } : { raw: encodedMessage })
       }
     );
 
