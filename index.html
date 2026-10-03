@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ACME</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#ffffff">
@@ -464,6 +464,11 @@
   .money-row { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 12px; }
   .money-row b { font-family: var(--display); font-size: 26px; font-weight: 700; }
   .chip-due { background: rgba(240,40,60,0.1); color: var(--red); }
+  /* Comportamento da app: niente zoom. touch-action toglie lo zoom col doppio
+     tocco; i campi a 16px evitano che iPhone ingrandisca la pagina quando li
+     si tocca (lo fa con qualsiasi testo più piccolo). */
+  html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  input:not([readonly]), textarea:not([readonly]), select { font-size: 16px !important; }
 </style>
 </head>
 <body>
@@ -4131,6 +4136,11 @@ Domus 106`;
     } catch (e) {}
   }
 }
+
+// Niente zoom con il pizzico: iPhone ignora user-scalable=no del viewport,
+// quindi il gesto va bloccato anche qui.
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+document.addEventListener('touchmove', e => { if (e.scale !== undefined && e.scale !== 1) e.preventDefault(); }, { passive: false });
 
 const app = new ACME();
 window.__acme = app;
