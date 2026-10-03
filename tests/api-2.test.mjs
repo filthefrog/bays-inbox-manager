@@ -52,6 +52,6 @@ res=mkres(); await quote({method:'POST',body:{action:'pdf',guestName:'Bianchi',c
 ok(res.code===400,'4 ospiti con una camera: rifiutato');
 // AI prompt riceve le date occupate
 const an=await import(R+'lib/analyze-email.js'); let prompt='';
-script=(u,o)=>{ if(u.includes('anthropic')){ prompt=JSON.parse(o.body).messages[0].content; return {status:200,body:{content:[{text:'{"category":"Prenotazione","tone":"Cortese","discrepancy":null,"response_cortese":"a","response_fermo":"b","response_deciso":"c"}'}]}}; } return null; };
+script=(u,o)=>{ if(u.includes('anthropic')){ prompt=JSON.parse(o.body).messages[0].content; return {status:200,body:{content:[{type:'text',text:'{"category":"Prenotazione","tone":"Cortese","discrepancy":null,"response_cortese":"a","response_fermo":"b","response_deciso":"c"}'}]}}; } return null; };
 await an.analyzeAndRespond({from:'x',subject:'y',body:'z'},'k',{today:'2026-10-03',occupied:av.occupiedText([{start:'2026-10-12',end:'2026-10-14'},{start:'2026-10-13',end:'2026-10-17'}])});
 ok(prompt.includes('DATE GIÀ OCCUPATE') && prompt.includes('dal 12 ottobre al 17 ottobre 2026') && prompt.includes('Seconda camera'),'IA: riceve date occupate (unite) e listino', prompt.slice(0,0));

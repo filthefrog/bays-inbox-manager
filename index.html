@@ -2449,23 +2449,42 @@ Se ha due minuti, una Sua recensione ci aiuta davvero molto. E se dovesse tornar
     // chiave, il telefono non ne ha bisogno (vedi loadEmails)
     await this.loadEmails();
     if (!PR) { this.error = 'Listino prezzi non caricato: ricarica la pagina prima di fare preventivi.'; this.render(); }
-    setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
+    // Posta sempre aggiornata: ogni minuto con l'app aperta e subito quando
+    // la si riapre. Non costa token: l'IA lavora solo sulle email nuove, le
+    // altre arrivano dalla memoria (Supabase).
+    setInterval(() => { if (document.visibilityState === 'visible') this.silentRefresh(); }, 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Date.now() - (this._lastRefreshAt || 0) > 20 * 1000) this.silentRefresh();
+    });
   }
 
   async silentRefresh() {
-    if (this.view !== 'dashboard') return;
+    // Aggiorna anche nella lista di una categoria (non durante la scrittura
+    // di una risposta o di un preventivo, dove ridisegnare darebbe fastidio)
+    if (this.view !== 'dashboard' && this.view !== 'emails') return;
+    if (this._refreshing) return;
+    this._refreshing = true;
+    this._lastRefreshAt = Date.now();
     try {
       const res = await fetch('/api/emails-analyzed', {
         headers: { ...claudeHeaders() }
       });
-      if (!res.ok) return;
-      const data = await res.json();
-      this.byCategory = data.byCategory || {};
-      this.lastUpdated = new Date();
-      this.reportCampaignSeen();
-      if (this.view === 'dashboard') this.render();
-    } catch (e) {}
-    this.loadReminders();
+      if (res.ok) {
+        const data = await res.json();
+        this.byCategory = data.byCategory || {};
+        this.lastUpdated = new Date();
+        this.reportCampaignSeen();
+        if (this.view === 'dashboard' || this.view === 'emails') this.render();
+      }
+    } catch (e) {
+    } finally {
+      this._refreshing = false;
+    }
+    // Promemoria (prenotazioni, pagamenti) ogni 5 minuti: cambiano di rado
+    if (Date.now() - (this._lastRemindersAt || 0) > 5 * 60 * 1000) {
+      this._lastRemindersAt = Date.now();
+      this.loadReminders();
+    }
   }
 
   saveKey() {
@@ -2520,6 +2539,7 @@ Se ha due minuti, una Sua recensione ci aiuta davvero molto. E se dovesse tornar
 
   openEmail(email) {
     this.selectedEmail = email;
+    this.generatingVariant = null;
     this.quoteState = this.emptyQuoteState();
     this.quoteState.guestName = this.extractGuestName(email.from);
     this.quoteState.open = email.category === 'Prenotazione';
@@ -3623,6 +3643,39 @@ Domus 106`;
     this.render();
   }
 
+  // Toni di risposta non ancora generati per questa email (le analisi
+  // precedenti li avevano già tutti e tre: riconosciute anche dall'etichetta)
+  missingVariants(e) {
+    const list = Array.isArray(e.responses) ? e.responses : [];
+    const has = (key, label) => list.some(r => r && typeof r === 'object' && (r.variant === key || r.label === label));
+    return [{ key: 'fermo', label: 'Fermo', color: 'orange' }, { key: 'deciso', label: 'Deciso', color: 'red' }]
+      .filter(v => !has(v.key, v.label));
+  }
+
+  async generateVariant(variant) {
+    const e = this.selectedEmail;
+    if (!e || this.generatingVariant) return;
+    this.generatingVariant = variant;
+    this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/regenerate-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...claudeHeaders() },
+        body: JSON.stringify({ variant, emailId: e.id, from: e.from, subject: e.subject, body: e.body, discrepancy: e.discrepancy || null })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.response) throw new Error(data.error || 'Generazione non riuscita');
+      if (!Array.isArray(e.responses)) e.responses = [];
+      e.responses.push(data.response);
+      this.activeResponseTab = e.responses.length - 1;
+    } catch (err) {
+      this.error = err.message;
+    }
+    this.generatingVariant = null;
+    if (this.view === 'detail' && this.selectedEmail === e) this.render();
+  }
+
   selectResponseTab(idx) {
     this.activeResponseTab = idx;
     this.render();
@@ -3954,15 +4007,20 @@ Domus 106`;
     const toneClass = (e.tone || '').toLowerCase();
     const allResponses = e.responses || [];
     const activeIdx = Math.min(this.activeResponseTab || 0, Math.max(0, allResponses.length - 1));
-    const tabsRow = allResponses.length > 1 ? `
+    // Le risposte "Fermo" e "Deciso" non si generano all'arrivo dell'email
+    // (token sprecati se non servono): la loro scheda le crea al primo tocco.
+    const missing = this.missingVariants(e);
+    const generating = this.generatingVariant;
+    const tabsRow = (allResponses.length + missing.length) > 1 ? `
       <div class="response-tabs">
         ${allResponses.map((r, idx) => {
           const isObj = r && typeof r === 'object';
           const label = isObj ? r.label : ('Opzione ' + (idx + 1));
           const color = isObj ? r.color : 'gray';
           const sentMark = e.sentIdx === idx ? ' · inviata' : '';
-          return `<button class="response-tab tab-${color} ${idx === activeIdx ? 'active' : ''}" onclick="app.selectResponseTab(${idx})"><span class="opt-dot ${color}"></span>${this.escape(label)}${sentMark}</button>`;
+          return `<button class="response-tab tab-${color} ${idx === activeIdx && !generating ? 'active' : ''}" onclick="app.selectResponseTab(${idx})"><span class="opt-dot ${color}"></span>${this.escape(label)}${sentMark}</button>`;
         }).join('')}
+        ${missing.map(v => `<button class="response-tab ${generating === v.key ? 'active' : ''}" ${generating ? 'disabled' : ''} onclick="app.generateVariant('${v.key}')"><span class="opt-dot ${v.color}" style="opacity:.45"></span>${v.label}</button>`).join('')}
       </div>` : '';
     const responses = allResponses.length ? (() => {
       const idx = activeIdx;
@@ -3973,6 +4031,9 @@ Domus 106`;
       const color = isObj ? r.color : 'gray';
       const sent = e.sentIdx === idx;
       const sending = this.sendingIdx === idx;
+      if (generating) return `
+        ${tabsRow}
+        <div class="response-card"><div class="loading" style="padding:28px 10px;"><div class="spinner"></div>Scrivo la risposta ${generating === 'fermo' ? 'ferma' : 'decisa'}…</div></div>`;
       return `
         ${tabsRow}
         <div class="response-card">

@@ -61,7 +61,7 @@ else ok(!r1.attempted,`promemoria fuori orario non parte (ora ${hourNow})`);
 
 // 10 analyze: categoria fuori elenco -> Da verificare
 const an=await import(R+'lib/analyze-email.js');
-script=(u)=> u.includes('anthropic')?{status:200,body:{content:[{text:'{"category":"Spam","tone":"Neutro","discrepancy":null,"response_cortese":"a","response_fermo":"b","response_deciso":"c"}'}]}}:null;
+script=(u)=> u.includes('anthropic')?{status:200,body:{content:[{type:'text',text:'{"category":"Spam","tone":"Neutro","discrepancy":null,"response_cortese":"a","response_fermo":"b","response_deciso":"c"}'}]}}:null;
 const out=await an.analyzeAndRespond({from:'x',subject:'y',body:'z'},'k'); ok(out.category==='Da verificare','categoria sconosciuta finisce in Da verificare');
 
 // 11 callback senza debug
