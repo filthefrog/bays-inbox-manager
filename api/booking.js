@@ -114,6 +114,43 @@ export default async function handler(req, res) {
     return res.status(200).json({ conflicts: conflictsWith(ranges, checkIn, checkOut), errors, checked });
   }
 
+  // Operazioni per soggiorno: email agli ospiti già inviate, comunicazioni
+  // Alloggiati Web già fatte, informazioni pratiche per gli ospiti. Tutto in
+  // app_state (nessuna colonna nuova da creare nel database).
+  const OPS_KEYS = { guestMail: 'guest_mails_sent', alloggiati: 'alloggiati_sent' };
+  const readJson = async (id) => { try { return JSON.parse((await stateGet(id)) || '{}'); } catch (e) { return {}; } };
+  if (req.method === 'GET' && req.query.opsState === '1') {
+    const [guestMails, alloggiati, guestInfo] = await Promise.all([readJson('guest_mails_sent'), readJson('alloggiati_sent'), readJson('guest_info')]);
+    return res.status(200).json({ guestMails, alloggiati, guestInfo });
+  }
+  if (req.method === 'POST' && req.body && req.body.markOps) {
+    const { kind, key, done } = req.body.markOps;
+    const id = OPS_KEYS[kind];
+    if (!id || !key || typeof key !== 'string' || key.length > 80) return res.status(400).json({ error: 'Operazione non valida' });
+    try {
+      const map = await readJson(id);
+      if (done === false) delete map[key]; else map[key] = new Date().toISOString();
+      // Tiene solo gli ultimi 500 segni, i più recenti
+      const keys = Object.keys(map);
+      if (keys.length > 500) keys.sort((a, b) => map[a].localeCompare(map[b])).slice(0, keys.length - 500).forEach(k => delete map[k]);
+      await stateSet(id, JSON.stringify(map));
+      return res.status(200).json({ success: true, map });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+  if (req.method === 'POST' && req.body && req.body.saveGuestInfo) {
+    const src = req.body.saveGuestInfo || {};
+    const clean = {};
+    ['wifiName', 'wifiPassword', 'arrivalInfo', 'iban', 'ibanHolder'].forEach(k => { clean[k] = String(src[k] || '').slice(0, 2000); });
+    try {
+      await stateSet('guest_info', JSON.stringify(clean));
+      return res.status(200).json({ success: true, guestInfo: clean });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   // Il database ha già le colonne nuove (camere, incassato)?
   if (req.method === 'GET' && req.query.schemaCheck === '1') {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?select=rooms,amount_paid&limit=1`, {

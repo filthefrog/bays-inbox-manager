@@ -3,6 +3,7 @@ import { getFreshAccessToken } from '../lib/gmail-token.js';
 import { computeQuote } from '../lib/pricing.js';
 import { KNOWLEDGE_BASE } from '../lib/analyze-email.js';
 import { buildQuotePdf } from '../lib/quote-pdf.js';
+import { claudeKey } from '../lib/auth.js';
 
 // Un solo endpoint per tutto ciò che riguarda i preventivi (genera+invia,
 // genera solo PDF, genera solo il messaggio con l'IA) — accorpato per stare
@@ -58,8 +59,8 @@ export default async function handler(req, res) {
 
   // --- genera solo il messaggio email con Claude, basato sulla mail del cliente ---
   if (action === 'message') {
-    const apiKey = req.headers['x-claude-key'];
-    if (!apiKey) return res.status(400).json({ error: 'Claude API key required' });
+    const apiKey = await claudeKey(req, res);
+    if (!apiKey) return;
 
     const { originalSubject, originalBody } = req.body;
     const input = quoteInput(req.body);

@@ -108,7 +108,33 @@ export default async function handler(req, res) {
     try {
       token = await getFreshAccessToken(refreshToken);
     } catch (err) {
-      return res.status(200).json({ skipped: true, reason: 'Token Gmail scaduto, serve riconnettersi dall\'app', checkoutReminder });
+      // Prima il controllo si fermava in silenzio: niente più analisi né
+      // notifiche urgenti finché non si riapriva l'app. Ora arriva un avviso,
+      // al massimo uno al giorno. Solo per un rifiuto vero di Google, non per
+      // un problema di rete momentaneo.
+      let alerted = false;
+      if (err.code === 'REFRESH_EXPIRED') {
+        try {
+          const today = romeDate();
+          const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/app_state?id=eq.gmail_alert_date&select=value`, { headers: h });
+          const rows = r.ok ? await r.json() : [];
+          if (r.ok && (!rows[0] || rows[0].value !== today)) {
+            await sendPushToAll({
+              title: 'Gmail scollegato',
+              body: 'ACME non riesce più a leggere la posta: apri l\'app e tocca Riconnetti Gmail.',
+              url: '/'
+            }).catch(() => {});
+            await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
+              method: 'POST',
+              headers: { ...h, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({ id: 'gmail_alert_date', value: today })
+            }).catch(() => {});
+            alerted = true;
+          }
+        } catch (e) {}
+      }
+      return res.status(200).json({ skipped: true, reason: 'Token Gmail scaduto, serve riconnettersi dall\'app', alerted, checkoutReminder });
     }
 
     const listResponse = await fetch(

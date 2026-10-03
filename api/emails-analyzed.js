@@ -3,7 +3,7 @@ import { sendPushToAll } from '../lib/send-push.js';
 import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
 import { LABEL_NAME } from './test-lab.js';
 import { getOccupied, occupiedText } from '../lib/availability.js';
-import { romeDate } from '../lib/auth.js';
+import { romeDate, claudeKey } from '../lib/auth.js';
 
 // Quante email nuove analizzare al massimo per richiesta: oltre, Vercel
 // rischia di interrompere la funzione (limite di tempo). Le altre vengono
@@ -36,10 +36,8 @@ export default async function handler(req, res) {
     });
   }
 
-  const apiKey = req.headers['x-claude-key'];
-  if (!apiKey) {
-    return res.status(400).json({ error: "Claude API key required" });
-  }
+  const apiKey = await claudeKey(req, res);
+  if (!apiKey) return;
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
