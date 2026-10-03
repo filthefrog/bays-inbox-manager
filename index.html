@@ -456,8 +456,9 @@
   .preview-total span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
   .preview-total b { font-family: var(--display); font-size: 28px; font-weight: 700; line-height: 1; }
   .conflict-list { margin: 6px 0 0 16px; line-height: 1.5; }
-  .avail-ok { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #00915a; margin-bottom: 10px; }
-  .avail-ok svg.i { width: 14px; height: 14px; stroke-width: 2.4; }
+  .avail-ok { display: block; font-size: 12px; font-weight: 600; color: #00915a; margin-bottom: 10px; line-height: 1.4; }
+  .avail-ok svg.i { width: 14px; height: 14px; stroke-width: 2.4; vertical-align: -2px; margin-right: 4px; }
+  .avail-miss { color: var(--text-secondary); font-weight: 500; }
   .copy-field { display: flex; gap: 8px; align-items: center; }
   .copy-field input { flex: 1; min-width: 0; font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace; margin-bottom: 0; }
   .steps { margin: 8px 0 0 18px; font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
@@ -469,6 +470,21 @@
      si tocca (lo fa con qualsiasi testo più piccolo). */
   html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   input:not([readonly]), textarea:not([readonly]), select { font-size: 16px !important; }
+  /* Scheda Soggiorno: due passi */
+  .stay-cta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .stay-cta b { display: block; font-size: 15px; font-weight: 600; }
+  .stay-cta small { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 3px; line-height: 1.35; }
+  .step { background: var(--bg); border-radius: var(--radius-md); padding: 16px 14px 14px; margin-top: 12px; }
+  .step-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+  .step-head b { display: block; font-family: var(--display); font-size: 21px; font-weight: 700; text-transform: uppercase; line-height: 1; }
+  .step-head small { display: block; font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.35; }
+  .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--text); color: white; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-weight: 700; font-size: 16px; flex-shrink: 0; }
+  .step.is-done .step-num { background: var(--green); }
+  .step-done { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #00915a; background: rgba(0,184,107,0.1); border-radius: 10px; padding: 9px 12px; margin-bottom: 12px; }
+  .step-done svg.i { width: 15px; height: 15px; stroke-width: 2.4; }
+  .step .form-input { background: var(--card); }
+  .step .pay-selector { background: var(--card); }
+  .stay .btn-primary { margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -607,7 +623,6 @@ class ACME {
     this.sendingIdx = null;
     this.quoteState = this.emptyQuoteState();
     this.standaloneQuoteState = this.emptyQuoteState();
-    this.emailBookingState = this.emptyQuoteState();
     this.pushEnabled = false;
     this.bookings = [];
     this.bookingsLoading = false;
@@ -640,6 +655,7 @@ class ACME {
       notes: '', guests: 2, guestHistory: [], paymentStatus: 'da saldare',
       rooms: null, roomsTouched: false, withSecurityDeposit: true,
       conflicts: null, availabilityErrors: [], amountPaid: '',
+      sentAt: null, sentTotal: null,
       prefilledFromQuote: false, quoteSentAt: null,
       confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
@@ -2228,8 +2244,9 @@ class ACME {
   openEmail(email) {
     this.selectedEmail = email;
     this.quoteState = this.emptyQuoteState();
-    this.emailBookingState = this.emptyQuoteState();
-    this.emailBookingState.guestName = this.extractGuestName(email.from);
+    this.quoteState.guestName = this.extractGuestName(email.from);
+    this.quoteState.open = email.category === 'Prenotazione';
+    this.quoteState.emailMessage = '';
     this.activeResponseTab = 0;
     this.regenerateBoxOpen = false;
     this.regenerateText = '';
@@ -2238,7 +2255,7 @@ class ACME {
     this.render();
     const guestEmail = this.extractEmailAddress(email.from);
     if (guestEmail) {
-      this.checkGuestHistory('emailBookingState', guestEmail);
+      this.checkGuestHistory('quoteState', guestEmail);
       this.checkPendingQuote(guestEmail);
     }
   }
@@ -2255,7 +2272,8 @@ class ACME {
       // Solo se siamo ancora sulla stessa mail/cliente (evita race condition
       // se l'utente ha già cambiato schermata quando la risposta arriva)
       if (!this.selectedEmail || this.extractEmailAddress(this.selectedEmail.from) !== email) return;
-      const bs = this.emailBookingState;
+      const bs = this.quoteState;
+      bs.open = true;
       if (pq.check_in) bs.checkIn = pq.check_in;
       if (pq.check_out) bs.checkOut = pq.check_out;
       if (pq.rate_per_night != null) { bs.ratePerNight = String(pq.rate_per_night); bs.rateTouched = true; }
@@ -2263,7 +2281,9 @@ class ACME {
       if (pq.guests) bs.guests = pq.guests;
       if (pq.rooms) { bs.rooms = pq.rooms; bs.roomsTouched = true; }
       bs.prefilledFromQuote = true;
-      this.checkAvailability('emailBookingState');
+      bs.sentAt = 'prima';
+      bs.emailMessage = this.buildDefaultQuoteMessage('quoteState');
+      this.checkAvailability('quoteState');
       bs.quoteSentAt = pq.created_at;
       this.render();
     } catch (e) {}
@@ -2382,16 +2402,10 @@ class ACME {
   }
 
   toggleQuoteForm() {
-    if (!this.quoteState.open && !this.quoteState.guestName) {
-      this.quoteState.guestName = this.extractGuestName(this.selectedEmail.from);
-    }
-    const opening = !this.quoteState.open;
-    this.quoteState.open = opening;
+    const qs = this.quoteState;
+    qs.open = !qs.open;
+    if (qs.open && !qs.guestName) qs.guestName = this.extractGuestName(this.selectedEmail.from);
     this.render();
-    if (opening && !this.quoteState.guestHistory.length) {
-      const guestEmail = this.extractEmailAddress(this.selectedEmail.from);
-      if (guestEmail) this.checkGuestHistory('quoteState', guestEmail);
-    }
   }
 
   selectGuests(stateKey, n) {
@@ -2426,7 +2440,7 @@ class ACME {
       guests: qs.guests, rooms: this.roomsFor(qs),
       rateOverride: qs.rateTouched && qs.ratePerNight !== '' ? parseFloat(qs.ratePerNight) : undefined,
       discountPercent: qs.discountPercent === '' ? undefined : parseFloat(qs.discountPercent),
-      withSecurityDeposit: stateKey !== 'emailBookingState' && !!qs.withSecurityDeposit
+      withSecurityDeposit: !!qs.withSecurityDeposit
     };
   }
 
@@ -2440,7 +2454,7 @@ class ACME {
     const rooms = this.roomsFor(qs);
     const forced = PR && Number(qs.guests) >= PR.PRICING.secondRoomFromGuests;
     const P = PR ? PR.PRICING : null;
-    const previewId = { quoteState: 'quotePreview', standaloneQuoteState: 'standaloneQuotePreview', emailBookingState: 'emailBookingPreview' }[stateKey];
+    const previewId = stateKey + 'Preview';
     return `
       ${this.renderGuestSelector(stateKey, qs.guests)}
       <span class="form-label">Camere</span>
@@ -2756,12 +2770,10 @@ class ACME {
     if (field === 'discountPercent') qs.discountTouched = true;
     if (field === 'emailMessage') qs.messageTouched = true;
     if (field === 'checkIn' || field === 'checkOut') { this.applySuggestedDefaults(stateKey); this.checkAvailability(stateKey); }
-    // emailBookingState non ha un messaggio email da rigenerare (non invia mail,
-    // serve solo a confermare una prenotazione diretta con tariffa/totale)
-    const messageElIds = { quoteState: 'quoteMessage', standaloneQuoteState: 'standaloneQuoteMessage' };
-    if (messageElIds[stateKey] && field !== 'emailMessage' && !qs.messageTouched) {
+    // Messaggio di accompagnamento aggiornato con i dati, finché non lo si scrive a mano
+    if (field !== 'emailMessage' && !qs.messageTouched) {
       qs.emailMessage = this.buildDefaultQuoteMessage(stateKey);
-      const msgEl = document.getElementById(messageElIds[stateKey]);
+      const msgEl = document.getElementById(stateKey + 'Message');
       if (msgEl) msgEl.value = qs.emailMessage;
     }
     this.refreshQuotePreview(stateKey);
@@ -2832,6 +2844,7 @@ Domus 106`;
       if (qs._availKey !== key || !res.ok) return;
       qs.conflicts = data.conflicts || [];
       qs.availabilityErrors = data.errors || [];
+      qs.availabilityChecked = data.checked || ['ACME'];
       this.refreshQuotePreview(stateKey);
     } catch (e) {}
   }
@@ -2843,12 +2856,15 @@ Domus 106`;
     }
     const errs = qs.availabilityErrors && qs.availabilityErrors.length
       ? `<div class="discrepancy-banner" style="margin-bottom:12px;">Disponibilità non verificata del tutto: ${this.escape(qs.availabilityErrors.join('; '))}</div>` : '';
-    return errs || (qs.conflicts ? `<div class="avail-ok">${ICON('check')} Date libere su ACME${qs.availabilityErrors && qs.availabilityErrors.length ? '' : ', Booking e Airbnb collegati'}</div>` : '');
+    // Indica solo le fonti davvero controllate: senza i link dei portali,
+    // "libere" vale solo per le prenotazioni salvate in ACME
+    const fonti = (qs.availabilityChecked || ['ACME']).join(', ');
+    const manca = ['Booking', 'Airbnb'].filter(x => !(qs.availabilityChecked || []).includes(x));
+    return errs || (qs.conflicts ? `<div class="avail-ok">${ICON('check')} Date libere su ${fonti}${manca.length ? `<span class="avail-miss"> · ${manca.join(' e ')} non collegat${manca.length > 1 ? 'i' : 'o'}</span>` : ''}</div>` : '');
   }
 
   refreshQuotePreview(stateKey) {
-    const previewElIds = { quoteState: 'quotePreview', standaloneQuoteState: 'standaloneQuotePreview', emailBookingState: 'emailBookingPreview' };
-    const previewEl = document.getElementById(previewElIds[stateKey]);
+    const previewEl = document.getElementById(stateKey + 'Preview');
     if (!previewEl) return;
     const qs = this[stateKey];
     if (!qs.checkIn || !qs.checkOut) { previewEl.innerHTML = ''; return; }
@@ -2856,7 +2872,10 @@ Domus 106`;
       const q = this.computeLocalQuote(stateKey);
       const misto = q.groups.length > 1;
       const rows = q.groups.map(g => `<div class="detail-row"><span class="label">${g.nights} nott${g.nights === 1 ? 'e' : 'i'}${misto ? ' ' + g.season.toLowerCase().replace(' stagione', '') : ''} × ${EUR(g.rate)}</span>${EUR(g.nights * g.rate)}</div>`).join('');
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+      const past = new Date(qs.checkIn + 'T00:00:00') < t0;
       previewEl.innerHTML = `
+        ${past ? `<div class="discrepancy-banner" style="margin-bottom:12px;">La data di arrivo è già passata: controlla il check-in.</div>` : ''}
         ${this.renderConflicts(qs)}
         ${rows}
         ${q.rooms === 2 ? `<div class="detail-row"><span class="label">Seconda camera · ${q.nights} notti</span>${EUR(q.secondRoomNightly)}</div>
@@ -2901,7 +2920,7 @@ Domus 106`;
       if (!res.ok) throw new Error(data.error || ('Generazione fallita (status ' + res.status + ')'));
       qs.emailMessage = data.message;
       qs.messageTouched = true;
-      const msgEl = document.getElementById('quoteMessage');
+      const msgEl = document.getElementById(stateKey + 'Message');
       if (msgEl) msgEl.value = data.message;
     } catch (e) {
       this.error = e.message;
@@ -3027,7 +3046,7 @@ Domus 106`;
     const pay = qs.paymentStatus || 'da saldare';
     const amountPaid = pay === 'saldata' ? total : (pay === 'acconto versato' ? q.depositAmount : 0);
 
-    const hasSourceEmail = (stateKey === 'quoteState' || stateKey === 'emailBookingState') && this.selectedEmail;
+    const hasSourceEmail = stateKey === 'quoteState' && this.selectedEmail;
     const guestEmail = hasSourceEmail
       ? this.extractEmailAddress(this.selectedEmail.from)
       : (qs.recipientEmail || '').trim();
@@ -3177,7 +3196,15 @@ Domus 106`;
       const res = await fetch('/api/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', to: deliverTo, guestName, emailMessage, ...this.quoteParams(stateKey) })
+        body: JSON.stringify({
+          action: 'send', to: deliverTo, guestName, emailMessage, ...this.quoteParams(stateKey),
+          // Risposta nella conversazione dell'ospite (non per le email di test deviate)
+          ...(stateKey === 'quoteState' && deliverTo === to ? {
+            threadId: this.selectedEmail.threadId || null,
+            inReplyTo: this.selectedEmail.messageId || null,
+            replySubject: this.selectedEmail.subject || null
+          } : {})
+        })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -3185,7 +3212,17 @@ Domus 106`;
       }
       qs.sending = false;
       qs.sent = true;
+      qs.sentAt = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+      qs.sentTotal = data.total;
+      qs.prefilledFromQuote = false;
       this.showQuoteConfirmation(data.confirmed, data.total);
+      // Il preventivo è la risposta all'email: la si toglie dalle "da gestire",
+      // come quando si invia una risposta suggerita
+      if (stateKey === 'quoteState' && this.selectedEmail) {
+        this.resolvedIds.add(this.selectedEmail.id);
+        this.saveResolvedIds();
+        fetch('/api/mark-resolved', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emailId: this.selectedEmail.id }) }).catch(() => {});
+      }
       // Salva il preventivo come "in sospeso" per questo cliente, così quando
       // risponde per confermare non serve ridigitare tariffa/sconto/date.
       fetch('/api/booking', {
@@ -3200,7 +3237,7 @@ Domus 106`;
           guests: qs.guests || null,
           rooms: q.rooms,
           total: data.total,
-          sourceSubject: this.selectedEmail ? this.selectedEmail.subject : null
+          sourceSubject: stateKey === 'quoteState' && this.selectedEmail ? this.selectedEmail.subject : null
         })
       }).catch(() => {});
     } catch (e) {
@@ -3669,88 +3706,17 @@ Domus 106`;
         <button class="btn btn-secondary" style="width:auto; margin-top:4px;" onclick="app.toggleRegenerateBox(true)">Rigenera</button>`
     ) : '';
 
-    const quoteOpen = this.quoteState.open;
-
-    const bs = this.emailBookingState;
-    const bookingSection = `
-      <details class="booking-disclosure" ${bs.confirmed ? 'open' : ''}>
-        <summary><span class="settings-icon-badge">${ICON('clipboard')}</span>Prenotazione ${bs.confirmed ? '<span class="chip chip-pay-saldata" style="margin-left:4px;">salvata</span>' : ''}<span class="chevron">${ICON('chev')}</span></summary>
-        <div class="disclosure-body">
-        ${bs.prefilledFromQuote ? `<div class="discrepancy-banner info-banner"><b>Dati precompilati</b> dal preventivo inviato il ${bs.quoteSentAt ? this.formatQuoteDate(bs.quoteSentAt.slice(0, 10)) : 'in precedenza'} — controlla prima di confermare.</div>` : ''}
-        ${this.renderGuestHistoryBanner(bs.guestHistory)}
-        <span class="form-label">Nome ospite</span>
-        <input type="text" class="form-input" value="${this.escape(bs.guestName)}" oninput="app.updateQuoteField('emailBookingState','guestName', this.value)">
-        <div style="display:flex; gap:10px;">
-          <div style="flex:1; min-width:0;">
-            <span class="form-label">Check-in</span>
-            <input type="date" class="form-input" value="${bs.checkIn}" oninput="app.updateQuoteField('emailBookingState','checkIn', this.value)">
-          </div>
-          <div style="flex:1; min-width:0;">
-            <span class="form-label">Check-out</span>
-            <input type="date" class="form-input" value="${bs.checkOut}" oninput="app.updateQuoteField('emailBookingState','checkOut', this.value)">
-          </div>
-        </div>
-        ${this.renderPricingFields('emailBookingState', false)}
-        ${this.renderPaymentSelector('emailBookingState', bs.paymentStatus)}
-        <span class="form-label">Note</span>
-        <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('emailBookingState','notes', this.value)">${this.escape(bs.notes)}</textarea>
-        <div class="confirm-booking-box">
-          <div class="title">Prenotazione confermata?</div>
-          <div class="subtitle">Salva e aggiungi al Calendario del telefono</div>
-          <button class="btn ${bs.confirmed ? 'confirmed' : ''}" ${bs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('emailBookingState')">${bs.confirming ? 'Un attimo…' : (bs.confirmed ? 'Salvata e aggiunta al Calendario' : 'Conferma e aggiungi al Calendario')}</button>
-          ${bs.confirmed && bs.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${bs.confirmedCode}</b></div>` : ''}
-        </div>
-        </div>
-      </details>`;
-
-    const quoteHeader = quoteOpen
-      ? `<div class="back" onclick="app.toggleQuoteForm()">‹ Preventivo</div>`
-      : `<div class="section-title">Preventivo</div>`;
-
-    const quoteSection = `
-      ${quoteHeader}
-      <div class="detail-card">
-        ${!quoteOpen ? `
-          <button class="btn btn-primary" onclick="app.toggleQuoteForm()">${ICON('doc')} Formula preventivo</button>
-        ` : this.quoteState.sent ? `
-          <div class="sent-confirm">${ICON('check')} Preventivo inviato a ${this.escape(this.quoteState.guestName)}</div>
-        ` : `
-          <span class="form-label">Nome ospite</span>
-          <input type="text" class="form-input" value="${this.escape(this.quoteState.guestName)}" oninput="app.updateQuoteField('quoteState','guestName', this.value)">
-          ${this.renderGuestHistoryBanner(this.quoteState.guestHistory)}
-          <div style="display:flex; gap:10px;">
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Check-in</span>
-              <input type="date" class="form-input" value="${this.quoteState.checkIn}" oninput="app.updateQuoteField('quoteState','checkIn', this.value)">
-            </div>
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Check-out</span>
-              <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('quoteState','checkOut', this.value)">
-            </div>
-          </div>
-          <span class="form-label">Note</span>
-          <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('quoteState','notes', this.value)">${this.escape(this.quoteState.notes)}</textarea>
-          ${this.renderPricingFields('quoteState', true)}
-          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
-            <span class="form-label" style="margin-bottom:0;">Messaggio email di accompagnamento</span>
-            <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI('quoteState')">${ICON('sparkle')} ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
-          </div>
-          <textarea id="quoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('quoteState','emailMessage', this.value)">${this.escape(this.quoteState.emailMessage)}</textarea>
-          <div class="btn-row">
-            <button class="btn btn-send" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.sendQuote('quoteState')">${this.quoteState.sending ? 'Invio…' : 'Genera e invia PDF'}</button>
-            <button class="btn btn-reject" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.toggleQuoteForm()">Annulla</button>
-          </div>
-          <div class="btn-row">
-            <button class="btn btn-secondary" ${this.quoteState.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('quoteState')">${this.quoteState.sharing ? 'Preparazione…' : 'Condividi PDF (WhatsApp e altro)'}</button>
-          </div>
-          <div class="confirm-booking-box">
-            <div class="title">Prenotazione confermata?</div>
-            <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
-            <button class="btn ${this.quoteState.confirmed ? 'confirmed' : ''}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Un attimo…' : (this.quoteState.confirmed ? 'Salvata e aggiunta al Calendario' : 'Conferma e aggiungi al Calendario')}</button>
-            ${this.quoteState.confirmed && this.quoteState.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${this.quoteState.confirmedCode}</b></div>` : ''}
-          </div>
-        `}
-      </div>`;
+    // Un'unica scheda per il soggiorno: dati inseriti una volta, poi i due
+    // passi in ordine (preventivo, conferma). Prima c'erano due moduli
+    // separati con gli stessi campi e tre pulsanti di conferma.
+    const qs = this.quoteState;
+    const staySection = qs.open
+      ? `<div class="section-title">Soggiorno</div>${this.renderStayFlow('quoteState', 'email')}`
+      : `<div class="section-title">Soggiorno</div>
+         <div class="detail-card stay-cta">
+           <div><b>Preventivo e prenotazione</b><small>Prezzo dal listino, PDF all'ospite, poi conferma con un tocco</small></div>
+           <button class="btn btn-primary" style="flex:none; width:auto; padding:12px 18px;" onclick="app.toggleQuoteForm()">${ICON('doc')} Prepara</button>
+         </div>`;
 
     const originalMessageSection = `
       <div class="section-title">Messaggio originale</div>
@@ -3779,57 +3745,77 @@ Domus 106`;
           <span class="pill tone-${toneClass}">${e.tone}</span>
         </div>
       </div>
-      ${quoteOpen
-        ? originalMessageSection + quoteSection + bookingSection
-        : originalMessageSection + responsesSection + quoteSection + bookingSection}`;
+      ${e.category === 'Prenotazione' || qs.open
+        ? originalMessageSection + staySection + responsesSection
+        : originalMessageSection + responsesSection + staySection}`;
   }
 
   renderStandaloneQuote() {
-    const qs = this.standaloneQuoteState;
     return `
       <div class="list-header">
         <div class="back" onclick="app.goBack()">‹ ACME</div>
       </div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
-      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Genera preventivo</h1></div>
-      <div class="detail-card">
-        ${qs.sent ? `
-          <div class="sent-confirm">${ICON('check')} Preventivo inviato a ${this.escape(qs.guestName)}</div>
-          <button class="btn btn-primary" style="margin-top:12px;" onclick="app.openStandaloneQuote()">Nuovo preventivo</button>
-        ` : `
-          <span class="form-label">Nome ospite</span>
-          <input type="text" class="form-input" value="${this.escape(qs.guestName)}" oninput="app.updateQuoteField('standaloneQuoteState','guestName', this.value)">
-          <span class="form-label">Email destinatario</span>
-          <input type="email" class="form-input" placeholder="nome@esempio.com" value="${this.escape(qs.recipientEmail)}" oninput="app.updateQuoteField('standaloneQuoteState','recipientEmail', this.value)" onblur="app.checkGuestHistory('standaloneQuoteState', this.value)">
-          ${this.renderGuestHistoryBanner(qs.guestHistory)}
-          <div style="display:flex; gap:10px;">
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Check-in</span>
-              <input type="date" class="form-input" value="${qs.checkIn}" oninput="app.updateQuoteField('standaloneQuoteState','checkIn', this.value)">
-            </div>
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Check-out</span>
-              <input type="date" class="form-input" value="${qs.checkOut}" oninput="app.updateQuoteField('standaloneQuoteState','checkOut', this.value)">
-            </div>
+      <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Preventivo e prenotazione</h1></div>
+      <div style="font-size:12.5px; color:var(--text-secondary); margin:-12px 2px 16px; line-height:1.45;">Per richieste arrivate fuori dalla posta (telefono, WhatsApp, di persona). Se l'ospite ha già scritto un'email, parti da quella: la risposta resta nella stessa conversazione.</div>
+      ${this.renderStayFlow('standaloneQuoteState', 'standalone')}
+      ${this.standaloneQuoteState.confirmed ? `<button class="btn btn-secondary" style="width:100%; margin-top:4px;" onclick="app.openStandaloneQuote()">Nuovo soggiorno</button>` : ''}`;
+  }
+
+  // Scheda Soggiorno: dati, prezzo, 1 · preventivo, 2 · conferma
+  renderStayFlow(stateKey, mode) {
+    const qs = this[stateKey];
+    const k = stateKey;
+    const busy = qs.sending || qs.sharing || qs.confirming;
+    const recipient = mode === 'email' ? this.extractEmailAddress(this.selectedEmail.from) : (qs.recipientEmail || '').trim();
+    const sentLine = qs.sentAt
+      ? `<div class="step-done">${ICON('check')} Inviato ${qs.sentAt === 'prima' ? 'in precedenza' : 'alle ' + qs.sentAt}${recipient ? ' a ' + this.escape(recipient) : ''}${qs.sentTotal != null ? ' · ' + EUR(qs.sentTotal) : ''}</div>` : '';
+    return `
+      <div class="detail-card stay">
+        ${qs.prefilledFromQuote ? `<div class="discrepancy-banner info-banner"><b>Preventivo già inviato</b> il ${qs.quoteSentAt ? this.formatQuoteDate(qs.quoteSentAt.slice(0, 10)) : 'in precedenza'}: dati ripresi da lì. Controllali e conferma.</div>` : ''}
+        ${this.renderGuestHistoryBanner(qs.guestHistory)}
+        <span class="form-label">Nome ospite</span>
+        <input type="text" class="form-input" value="${this.escape(qs.guestName)}" oninput="app.updateQuoteField('${k}','guestName', this.value)">
+        ${mode === 'standalone' ? `
+        <span class="form-label">Email ospite</span>
+        <input type="email" class="form-input" placeholder="nome@esempio.com (serve solo per inviare il PDF)" value="${this.escape(qs.recipientEmail)}" oninput="app.updateQuoteField('${k}','recipientEmail', this.value)" onblur="app.checkGuestHistory('${k}', this.value)">` : ''}
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1; min-width:0;">
+            <span class="form-label">Check-in</span>
+            <input type="date" class="form-input" value="${qs.checkIn}" oninput="app.updateQuoteField('${k}','checkIn', this.value)">
           </div>
-          <span class="form-label">Note</span>
-          <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('standaloneQuoteState','notes', this.value)">${this.escape(qs.notes)}</textarea>
-          ${this.renderPricingFields('standaloneQuoteState', true)}
-          <span class="form-label">Messaggio email di accompagnamento</span>
-          <textarea id="standaloneQuoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('standaloneQuoteState','emailMessage', this.value)">${this.escape(qs.emailMessage)}</textarea>
+          <div style="flex:1; min-width:0;">
+            <span class="form-label">Check-out</span>
+            <input type="date" class="form-input" value="${qs.checkOut}" oninput="app.updateQuoteField('${k}','checkOut', this.value)">
+          </div>
+        </div>
+        ${this.renderPricingFields(k, true)}
+
+        <div class="step ${qs.sentAt ? 'is-done' : ''}">
+          <div class="step-head"><span class="step-num">1</span><div><b>Preventivo</b><small>PDF all'ospite con prezzo, acconto e condizioni</small></div></div>
+          ${sentLine}
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
+            <span class="form-label" style="margin-bottom:0;">Messaggio</span>
+            ${mode === 'email' ? `<a style="font-size:12px; ${qs.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI('${k}')">${ICON('sparkle')} ${qs.generatingMessage ? 'Scrivo…' : 'Scrivi con IA'}</a>` : ''}
+          </div>
+          <textarea id="${k}Message" class="form-input" style="min-height:150px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('${k}','emailMessage', this.value)">${this.escape(qs.emailMessage)}</textarea>
           <div class="btn-row">
-            <button class="btn btn-send" ${qs.sending ? 'disabled' : ''} onclick="app.sendQuote('standaloneQuoteState')">${qs.sending ? 'Invio…' : 'Genera e invia via email'}</button>
+            <button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.sendQuote('${k}')">${ICON('mail')} ${qs.sending ? 'Invio…' : (qs.sentAt ? 'Reinvia' : 'Invia email')}</button>
+            <button class="btn btn-secondary" ${busy ? 'disabled' : ''} onclick="app.shareQuotePdf('${k}')">${ICON('share')} ${qs.sharing ? 'Preparo…' : 'Condividi'}</button>
           </div>
-          <div class="btn-row">
-            <button class="btn btn-secondary" ${qs.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('standaloneQuoteState')">${qs.sharing ? 'Preparazione…' : 'Condividi PDF (WhatsApp e altro)'}</button>
-          </div>
-          <div class="confirm-booking-box">
-            <div class="title">Prenotazione confermata?</div>
-            <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
-            <button class="btn ${qs.confirmed ? 'confirmed' : ''}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Un attimo…' : (qs.confirmed ? 'Salvata e aggiunta al Calendario' : 'Conferma e aggiungi al Calendario')}</button>
-            ${qs.confirmed && qs.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${qs.confirmedCode}</b></div>` : ''}
-          </div>
-        `}
+        </div>
+
+        <div class="step ${qs.confirmed ? 'is-done' : ''}">
+          <div class="step-head"><span class="step-num">2</span><div><b>Conferma</b><small>Quando l'ospite accetta: salva, blocca le date e aggiunge al Calendario</small></div></div>
+          ${qs.confirmed ? `
+            <div class="step-done">${ICON('check')} Prenotazione salvata${qs.confirmedCode ? ` · codice <b>${this.escape(qs.confirmedCode)}</b>` : ''}</div>
+          ` : `
+            ${this.renderPaymentSelector(k, qs.paymentStatus)}
+            <span class="form-label">Note</span>
+            <textarea class="form-input" style="min-height:64px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('${k}','notes', this.value)">${this.escape(qs.notes)}</textarea>
+            <button class="btn btn-primary" ${busy ? 'disabled' : ''} onclick="app.confirmBooking('${k}')">${ICON('calendar')} ${qs.confirming ? 'Un attimo…' : 'Conferma prenotazione'}</button>
+          `}
+        </div>
       </div>`;
   }
 
@@ -4124,6 +4110,10 @@ Domus 106`;
     else if (this.view === 'testLab') el.innerHTML = this.renderTestLab();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
     else if (this.view === 'calendarSettings') el.innerHTML = this.renderCalendarSettings();
+    // Il riquadro del prezzo si riempie dopo il disegno: prima spariva a ogni
+    // render (cambio ospiti, camere, cauzione, errori) fino al tasto successivo.
+    if (this.view === 'detail' && this.quoteState.open) this.refreshQuotePreview('quoteState');
+    if (this.view === 'quoteStandalone') this.refreshQuotePreview('standaloneQuoteState');
     this.updateAppBadge();
   }
 
