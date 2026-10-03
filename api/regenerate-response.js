@@ -1,3 +1,5 @@
+import { claudeKey } from '../lib/auth.js';
+
 // Rigenera UNA risposta a partire da un'istruzione extra data dall'host,
 // per i casi in cui nessuna delle 3 risposte generate automaticamente va
 // bene — tipicamente perché il cliente fa riferimento a qualcosa che l'host
@@ -7,10 +9,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Metodo non consentito' });
   }
 
-  const apiKey = req.headers['x-claude-key'];
-  if (!apiKey) {
-    return res.status(400).json({ error: 'Claude API key required' });
-  }
+  const apiKey = await claudeKey(req, res);
+  if (!apiKey) return;
 
   const { subject, body, category, extraInstruction, guestName } = req.body || {};
   if (!extraInstruction || !extraInstruction.trim()) {

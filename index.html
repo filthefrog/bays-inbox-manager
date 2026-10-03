@@ -485,6 +485,11 @@
   .step .form-input { background: var(--card); }
   .step .pay-selector { background: var(--card); }
   .stay .btn-primary { margin-top: 2px; }
+  details.advanced { margin-top: 18px; }
+  details.advanced summary { list-style: none; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-secondary); padding: 6px 2px; }
+  details.advanced summary::-webkit-details-marker { display: none; }
+  details.advanced summary svg.i { width: 14px; height: 14px; transition: transform 0.2s ease; }
+  details.advanced[open] summary svg.i { transform: rotate(90deg); }
 </style>
 </head>
 <body>
@@ -533,6 +538,12 @@ const ICONS = {
 // Listino unico (lo stesso file usato dal server per PDF, email e IA)
 let PR = null;
 const PR_READY = import('/lib/pricing.js?v=2').then(m => { PR = m; }).catch(() => {});
+
+// Chiave Claude: solo se inserita sul telefono; altrimenti il server usa la sua
+function claudeHeaders() {
+  const k = localStorage.getItem('claude_api_key');
+  return k ? { 'x-claude-key': k } : {};
+}
 
 // Importi in formato italiano: € 1.785 (senza ",00" se interi), € 127,50
 function EUR(n) {
@@ -767,7 +778,58 @@ class ACME {
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Statistiche</h1></div>
       <div style="font-size:12px; color:var(--text-secondary); margin:-8px 0 16px 4px; line-height:1.4;">Prenotazioni salvate in ACME. Occupazione sull'appartamento intero; le notti a cavallo di due mesi sono divise tra i mesi, con la loro quota di incasso. "€ a notte" = incasso medio per notte occupata.</div>
       ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Calcolo le statistiche…</div>`
-        : (rows || `<div class="empty">Nessuna prenotazione ancora registrata</div>`)}`;
+        : (rows || `<div class="empty">Nessuna prenotazione ancora registrata</div>`)}
+      ${this.bookings.length ? `
+      <div class="section-title">Per il commercialista</div>
+      <div class="detail-card">
+        <div style="font-size:13px; line-height:1.5; color:var(--text-secondary); margin-bottom:12px;">File per Excel con tutte le prenotazioni dell'anno (arrivo nell'anno), importi incassati e da incassare, e i totali per mese.</div>
+        <div class="btn-row">
+          ${[...new Set(this.bookings.map(b => (b.check_in || '').slice(0, 4)).filter(Boolean))].sort().reverse().slice(0, 3).map(y => `<button class="btn btn-secondary" onclick="app.exportYear('${y}')">${ICON('share')} ${y}</button>`).join('')}
+        </div>
+      </div>` : ''}`;
+  }
+
+  // CSV con ";" e virgola decimale: si apre direttamente in Excel italiano
+  async exportYear(year) {
+    const num = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',');
+    const q = (v) => {
+      const t = String(v == null ? '' : v);
+      return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    };
+    const list = this.bookings.filter(b => (b.check_in || '').startsWith(year)).sort((a, b) => a.check_in.localeCompare(b.check_in));
+    const rows = [['Codice', 'Ospite', 'Email', 'Arrivo', 'Partenza', 'Notti', 'Ospiti', 'Camere', 'Totale', 'Incassato', 'Da incassare', 'Stato', 'Pagamento', 'Note']];
+    list.forEach(b => {
+      let nights = '';
+      try { nights = PR ? PR.countNights(b.check_in, b.check_out) : ''; } catch (e) {}
+      const canc = b.status === 'cancellata';
+      rows.push([b.code || '', b.guest_name || '', b.guest_email || '', b.check_in, b.check_out, nights, b.guests || '', this.bookingRooms(b),
+        num(b.total), num(this.paidOf(b)), num(canc ? 0 : this.dueOf(b)), b.status || 'confermata', b.payment_status || 'da saldare', (b.notes || '').replace(/\s+/g, ' ')]);
+    });
+    rows.push([]);
+    rows.push(['Totali per mese (prenotazioni non cancellate, mese di arrivo)']);
+    rows.push(['Mese', 'Prenotazioni', 'Totale', 'Incassato']);
+    const byMonth = {};
+    list.filter(b => b.status !== 'cancellata').forEach(b => {
+      const m = b.check_in.slice(0, 7);
+      const x = byMonth[m] || (byMonth[m] = { n: 0, tot: 0, paid: 0 });
+      x.n += 1; x.tot += Number(b.total) || 0; x.paid += this.paidOf(b);
+    });
+    let T = { n: 0, tot: 0, paid: 0 };
+    Object.keys(byMonth).sort().forEach(m => {
+      const x = byMonth[m];
+      T.n += x.n; T.tot += x.tot; T.paid += x.paid;
+      rows.push([this.capitalize(new Date(m + '-01T12:00:00').toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })), x.n, num(x.tot), num(x.paid)]);
+    });
+    rows.push(['Totale ' + year, T.n, num(T.tot), num(T.paid)]);
+    const csv = '\uFEFF' + rows.map(r => r.map(q).join(';')).join('\r\n');
+    const file = new File([csv], `Domus106_prenotazioni_${year}.csv`, { type: 'text/csv' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: `Prenotazioni ${year}` }); return; }
+    } catch (e) { if (e.name === 'AbortError') return; }
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
   renderStatisticsMonth() {
@@ -842,6 +904,10 @@ class ACME {
         cleanerPending: data.cleanerPending || [],
         paymentPending: data.paymentPending || []
       };
+      // Prenotazioni e operazioni già fatte, per Alloggiati Web e email agli ospiti
+      const [rb, ro] = await Promise.all([fetch('/api/booking'), fetch('/api/booking?opsState=1')]);
+      if (rb.ok) this.opsBookings = ((await rb.json()).bookings) || [];
+      if (ro.ok) this.ops = await ro.json();
     } catch (e) {}
     // Solo dove i promemoria si vedono: ridisegnare altre schermate mentre si
     // scrive (risposta, preventivo) toglieva il cursore dal campo.
@@ -849,7 +915,161 @@ class ACME {
   }
 
   reminderCount() {
-    return this.reminders.cleanerPending.length + this.reminders.paymentPending.length + this.unresolvedCount('Da verificare');
+    const t = this.opsTasks();
+    return this.reminders.cleanerPending.length + this.reminders.paymentPending.length + this.unresolvedCount('Da verificare')
+      + t.alloggiati.length + t.mails.length;
+  }
+
+  // ---------- Operazioni per soggiorno: Alloggiati Web ed email agli ospiti ----------
+  localIso(offsetDays = 0) {
+    const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + offsetDays);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  opsTasks() {
+    const ops = this.ops || {};
+    const sent = ops.guestMails || {}, allog = ops.alloggiati || {};
+    const list = (this.opsBookings || []).filter(b => b.status !== 'cancellata' && b.check_in && b.check_out);
+    const today = this.localIso(), in3 = this.localIso(3), in7 = this.localIso(7), ago2 = this.localIso(-2), ago4 = this.localIso(-4);
+    const alloggiati = list.filter(b => b.check_in >= ago2 && b.check_in <= today && !allog[String(b.id)]);
+    const mails = [];
+    list.forEach(b => {
+      if (!b.guest_email) return;
+      const active = b.status !== 'conclusa';
+      if (active && b.check_in >= today && b.check_in <= in3 && !sent[`${b.id}:arrivo`]) mails.push({ type: 'arrivo', b });
+      if (active && b.check_in >= today && b.check_in <= in7 && b.total && this.dueOf(b) > 0 && b.payment_status !== 'saldata' && !sent[`${b.id}:saldo`]) mails.push({ type: 'saldo', b });
+      if (b.check_out >= ago4 && b.check_out <= today && !sent[`${b.id}:dopo`]) mails.push({ type: 'dopo', b });
+    });
+    return { alloggiati, mails };
+  }
+
+  async markOps(kind, key) {
+    const res = await fetch('/api/booking', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ markOps: { kind, key } })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Salvataggio non riuscito');
+    this.ops = this.ops || {};
+    this.ops[kind === 'alloggiati' ? 'alloggiati' : 'guestMails'] = data.map;
+  }
+
+  async markAlloggiati(id) {
+    try { await this.markOps('alloggiati', String(id)); } catch (e) { this.error = e.message; }
+    this.render();
+  }
+
+  // Bozze delle email agli ospiti. I dati pratici (Wi-Fi, ingresso, IBAN) si
+  // impostano una volta in Impostazioni; quelli mancanti restano tra [ ] e
+  // l'invio è bloccato finché non si completano.
+  guestMailDraft(type, b) {
+    const info = (this.ops && this.ops.guestInfo) || {};
+    const name = (b.guest_name || '').split(' ')[0] || b.guest_name;
+    const ci = this.formatQuoteDate(b.check_in), co = this.formatQuoteDate(b.check_out);
+    const firma = '\n\nA presto,\nDomus 106';
+    if (type === 'arrivo') {
+      const wifi = info.wifiName ? `Wi-Fi: rete «${info.wifiName}»${info.wifiPassword ? `, password ${info.wifiPassword}` : ''}.` : 'Wi-Fi: [nome rete e password]';
+      return {
+        subject: `Il Suo arrivo a Domus 106 — ${ci}`,
+        body: `Gentile ${name},
+
+la aspettiamo a Domus 106, in Via Papa Giovanni XXIII 106 a Civitanova Marche. Il check-in è libero a qualsiasi ora, in autonomia.
+
+${info.arrivalInfo ? info.arrivalInfo : '[Come entrare: indirizzo del portone, garage, codice di ingresso]'}
+
+${wifi}
+Il garage privato è incluso. Il check-out è entro le 11:00 del ${co}.
+
+Per legge dobbiamo registrare gli ospiti presso la Questura: Le chiedo di rispondere a questa email con una foto del documento d'identità di ogni ospite, prima dell'arrivo.${this.dueOf(b) > 0 && b.total ? `
+
+Le ricordo anche il saldo di ${EUR(this.dueOf(b))}, da versare entro l'arrivo.` : ''}${firma}`
+      };
+    }
+    if (type === 'saldo') {
+      return {
+        subject: `Saldo del soggiorno a Domus 106 — ${ci}`,
+        body: `Gentile ${name},
+
+Le scrivo per il soggiorno dal ${ci} al ${co}: resta da saldare ${EUR(this.dueOf(b))} su un totale di ${EUR(b.total)}.
+
+Può fare il bonifico entro il giorno dell'arrivo:
+IBAN ${info.iban || '[IBAN]'}
+intestato a ${info.ibanHolder || '[intestatario]'}
+causale: soggiorno ${b.code || ''} ${b.guest_name}
+
+Grazie, e mi scriva pure per qualsiasi dubbio.${firma}`
+      };
+    }
+    return {
+      subject: `Grazie per il soggiorno a Domus 106`,
+      body: `Gentile ${name},
+
+grazie per aver scelto Domus 106. Spero che il soggiorno sia stato piacevole e che abbia trovato tutto come si aspettava.
+
+Se ha due minuti, una Sua recensione ci aiuta davvero molto. E se dovesse tornare a Civitanova, mi scriva pure direttamente: per gli ospiti che tornano c'è sempre un occhio di riguardo.${firma}`
+    };
+  }
+
+  openGuestMail(type, id) {
+    const b = (this.opsBookings || []).find(x => x.id === id);
+    if (!b) return;
+    this.guestMail = { type, b, ...this.guestMailDraft(type, b), sending: false };
+    this.renderGuestMailModal();
+  }
+
+  renderGuestMailModal(err) {
+    const g = this.guestMail;
+    const titles = { arrivo: 'Email prima dell\'arrivo', saldo: 'Sollecito del saldo', dopo: 'Email dopo il soggiorno' };
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box" style="text-align:left;">
+        <h3 style="text-align:center;">${titles[g.type]}</h3>
+        <p style="text-align:center; margin-bottom:12px;">A ${this.escape(g.b.guest_name)} · ${this.escape(g.b.guest_email)}</p>
+        ${err ? `<div class="error-banner">${this.escape(err)}</div>` : ''}
+        <span class="form-label">Oggetto</span>
+        <input id="gmSubject" class="form-input" value="${this.escape(g.subject)}">
+        <textarea id="gmBody" class="form-input" style="min-height:240px; line-height:1.5; resize:vertical;">${this.escape(g.body)}</textarea>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="app.closeConfirmModal()">Annulla</button>
+          <button class="btn btn-send" ${g.sending ? 'disabled' : ''} onclick="app.sendGuestMail()">${g.sending ? 'Invio…' : 'Invia'}</button>
+        </div>
+        <button class="btn" style="width:100%; margin-top:8px; background:none; color:var(--text-secondary);" onclick="app.skipGuestMail()">Già fatto a parte: togli dall'elenco</button>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  async sendGuestMail() {
+    const g = this.guestMail;
+    g.subject = document.getElementById('gmSubject').value.trim();
+    g.body = document.getElementById('gmBody').value;
+    if (/\[[^\]]*\]/.test(g.body)) {
+      this.renderGuestMailModal('Completa le parti tra [ ] (oppure salva i dati una volta in Impostazioni → Calendari e info per gli ospiti).');
+      return;
+    }
+    let to;
+    try { to = this.redirectIfTest(g.b.guest_email); } catch (e) { this.renderGuestMailModal(e.message); return; }
+    g.sending = true; this.renderGuestMailModal();
+    try {
+      const res = await fetch('/api/send-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, subject: to === g.b.guest_email ? g.subject : `[TEST per ${g.b.guest_email}] ${g.subject}`, body: g.body })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Invio non riuscito');
+      await this.markOps('guestMail', `${g.b.id}:${g.type}`);
+      this.closeConfirmModal();
+      this.render();
+    } catch (e) {
+      g.sending = false;
+      this.renderGuestMailModal(e.message);
+    }
+  }
+
+  async skipGuestMail() {
+    const g = this.guestMail;
+    try { await this.markOps('guestMail', `${g.b.id}:${g.type}`); } catch (e) { this.renderGuestMailModal(e.message); return; }
+    this.closeConfirmModal();
+    this.render();
   }
 
   // ---------- Laboratorio di test ----------
@@ -1117,7 +1337,7 @@ class ACME {
     const out = { ok: false, error: null, seen: 0 };
     try {
       const res = await fetch('/api/emails-analyzed', {
-        headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
+        headers: { ...claudeHeaders() }
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -1236,7 +1456,7 @@ class ACME {
       } catch (e) { check('diag', 'Sistema', 'Diagnostica del server', false, e.message); }
 
       // 2) Questo telefono
-      check('dev:claude', 'Sistema', 'Chiave Claude salvata su questo telefono', !!localStorage.getItem('claude_api_key'), 'Reinseriscila da Impostazioni → Cambia chiave API');
+      check('dev:claude', 'Sistema', 'Chiave Claude disponibile (telefono o server)', this.view !== 'setup', 'Inseriscila da Impostazioni → Avanzate → Chiave API, oppure su Vercel');
       check('dev:push', 'Sistema', 'Notifiche push attive su questo iPhone', this.pushEnabled, 'Attivale da Impostazioni', 'avviso');
       check('dev:pwa', 'Sistema', 'App aperta dalla schermata Home', this.isStandalone(), 'Aperta da Safari: Calendario e push possono comportarsi in modo diverso', 'avviso');
 
@@ -1309,7 +1529,7 @@ class ACME {
       check('api:cleaner', 'Flussi dati', 'Lettura email della persona delle pulizie', ce.r.ok, ce.j.error || 'HTTP ' + ce.r.status);
 
       // 5) Posta: raggiungibilità e tempo di analisi (il limite di Vercel è 10 secondi)
-      if (localStorage.getItem('claude_api_key')) {
+      {
         const t0 = Date.now();
         const ib = await this.refreshInboxQuiet();
         const ms = Date.now() - t0;
@@ -1807,10 +2027,10 @@ class ACME {
     this.view = 'calendarSettings';
     this.render();
     try {
-      const [r1, r2] = await Promise.all([fetch('/api/booking?calendarSettings=1'), fetch('/api/booking?schemaCheck=1')]);
-      const d1 = await r1.json().catch(() => ({})), d2 = await r2.json().catch(() => ({}));
+      const [r1, r2, r3] = await Promise.all([fetch('/api/booking?calendarSettings=1'), fetch('/api/booking?schemaCheck=1'), fetch('/api/booking?opsState=1')]);
+      const d1 = await r1.json().catch(() => ({})), d2 = await r2.json().catch(() => ({})), d3 = await r3.json().catch(() => ({}));
       if (!r1.ok) throw new Error(d1.error || 'Impostazioni non disponibili');
-      Object.assign(this.cal, { booking: d1.booking, airbnb: d1.airbnb, feedUrl: d1.feedUrl, schemaOk: r2.ok ? !!d2.upToDate : null });
+      Object.assign(this.cal, { booking: d1.booking, airbnb: d1.airbnb, feedUrl: d1.feedUrl, schemaOk: r2.ok ? !!d2.upToDate : null, guestInfo: d3.guestInfo || {} });
     } catch (e) { this.error = e.message; }
     this.cal.loading = false;
     if (this.view === 'calendarSettings') this.render();
@@ -1836,6 +2056,21 @@ class ACME {
     this.render();
   }
 
+  async saveGuestInfo() {
+    const c = this.cal;
+    const v = (id) => (document.getElementById(id) || {}).value || '';
+    c.guestInfo = { wifiName: v('giWifi'), wifiPassword: v('giWifiPw'), arrivalInfo: v('giArrival'), iban: v('giIban').replace(/\s+/g, ' ').trim(), ibanHolder: v('giHolder') };
+    c.infoSaving = true; c.infoMessage = null; this.error = null; this.render();
+    try {
+      const res = await fetch('/api/booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ saveGuestInfo: c.guestInfo }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Salvataggio non riuscito');
+      this.ops = { ...(this.ops || {}), guestInfo: data.guestInfo };
+      c.infoMessage = 'Salvate: le bozze per gli ospiti le useranno da sole.';
+    } catch (e) { this.error = e.message; }
+    c.infoSaving = false; this.render();
+  }
+
   copyText(btn, text) {
     const original = btn.textContent;
     navigator.clipboard.writeText(text).then(() => {
@@ -1850,7 +2085,7 @@ class ACME {
     return `
       <div class="list-header"><div class="back" onclick="app.goBack()">‹ ACME</div></div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
-      <div class="topbar"><div class="eyebrow">Impostazioni</div><h1>Calendari</h1></div>
+      <div class="topbar"><div class="eyebrow">Impostazioni</div><h1>Calendari e ospiti</h1></div>
       ${c.loading ? `<div class="loading"><div class="spinner"></div>Carico le impostazioni…</div>` : `
       ${c.schemaOk === false ? `
       <div class="section-title" style="margin-top:0;">Aggiornamento del database</div>
@@ -1888,12 +2123,30 @@ class ACME {
           <li><b>Airbnb:</b> Collega calendari → Importa calendario → incolla il link</li>
           <li>I portali lo rileggono da soli ogni poche ore</li>
         </ol>
+      </div>
+
+      <div class="section-title">3 · Informazioni per gli ospiti</div>
+      <div class="detail-card">
+        <div style="font-size:13.5px; line-height:1.5; margin-bottom:12px;">Usate nelle email di arrivo e di sollecito del saldo (Promemoria → Email agli ospiti).</div>
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1; min-width:0;"><span class="form-label">Rete Wi-Fi</span><input id="giWifi" class="form-input" value="${this.escape((c.guestInfo || {}).wifiName || '')}"></div>
+          <div style="flex:1; min-width:0;"><span class="form-label">Password Wi-Fi</span><input id="giWifiPw" class="form-input" value="${this.escape((c.guestInfo || {}).wifiPassword || '')}"></div>
+        </div>
+        <span class="form-label">Come entrare</span>
+        <textarea id="giArrival" class="form-input" style="min-height:90px; resize:vertical;" placeholder="Es. il codice del portone è 1234#, il garage è il n. 6 al piano -1, le chiavi sono nella cassetta…">${this.escape((c.guestInfo || {}).arrivalInfo || '')}</textarea>
+        <span class="form-label">IBAN per i bonifici</span>
+        <input id="giIban" class="form-input" placeholder="IT00 X000 0000 0000 0000 0000 000" value="${this.escape((c.guestInfo || {}).iban || '')}">
+        <span class="form-label">Intestatario</span>
+        <input id="giHolder" class="form-input" value="${this.escape((c.guestInfo || {}).ibanHolder || '')}">
+        ${c.infoMessage ? `<div class="sent-confirm" style="margin:0 0 12px;">${ICON('check')} ${this.escape(c.infoMessage)}</div>` : ''}
+        <button class="btn btn-primary" ${c.infoSaving ? 'disabled' : ''} onclick="app.saveGuestInfo()">${c.infoSaving ? 'Salvo…' : 'Salva informazioni'}</button>
       </div>`}`;
   }
 
   openReminders() {
     this.view = 'reminders';
     this.render();
+    this.loadReminders();
   }
 
   async openReminderBooking(code) {
@@ -1919,6 +2172,7 @@ class ACME {
 
   renderReminders() {
     const { cleanerPending, paymentPending } = this.reminders;
+    const ops = this.opsTasks();
     const verifyCount = this.unresolvedCount('Da verificare');
 
     const cleanerRows = cleanerPending.map(b => {
@@ -1958,6 +2212,25 @@ class ACME {
         <div class="back" onclick="app.goBack()">‹ ACME</div>
       </div>
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Promemoria</h1></div>
+
+      <div class="section-title">Alloggiati Web</div>
+      ${ops.alloggiati.length ? ops.alloggiati.map(b => `
+        <div class="booking-row" style="padding-right:16px;">
+          <div class="name">${this.escape(b.guest_name)}${b.guests ? ` · ${b.guests} ospit${b.guests === 1 ? 'e' : 'i'}` : ''}</div>
+          <div class="dates">Arrivo <b>${this.formatQuoteDate(b.check_in)}</b> · da comunicare entro 24 ore</div>
+          <div class="btn-row" style="margin-top:10px;">
+            <a class="btn btn-secondary" style="text-decoration:none;" href="https://alloggiatiweb.poliziadistato.it/" target="_blank" rel="noopener">Apri Alloggiati Web</a>
+            <button class="btn btn-send" onclick="app.markAlloggiati(${b.id})">Fatto</button>
+          </div>
+        </div>`).join('') : `<div class="empty" style="padding:24px;">Niente in sospeso</div>`}
+
+      <div class="section-title">Email agli ospiti</div>
+      ${ops.mails.length ? ops.mails.map(m => `
+        <div class="booking-row" style="padding-right:16px;" onclick="app.openGuestMail('${m.type}', ${m.b.id})">
+          <div class="name">${{ arrivo: 'Istruzioni di arrivo', saldo: 'Sollecito saldo', dopo: 'Grazie e recensione' }[m.type]} · ${this.escape(m.b.guest_name)}</div>
+          <div class="dates">${m.type === 'dopo' ? 'Check-out' : 'Check-in'} <b>${this.formatQuoteDate(m.type === 'dopo' ? m.b.check_out : m.b.check_in)}</b>${m.type === 'saldo' ? ` · da incassare <b>${EUR(this.dueOf(m.b))}</b>` : ''}</div>
+          <div class="rate-info" style="margin-top:4px;">Tocca per vedere la bozza e inviarla</div>
+        </div>`).join('') : `<div class="empty" style="padding:24px;">Niente in sospeso</div>`}
 
       <div class="section-title">Pulizie da confermare</div>
       ${cleanerRows || `<div class="empty" style="padding:24px;">Niente in sospeso</div>`}
@@ -2172,8 +2445,8 @@ class ACME {
       window.history.replaceState({}, '', window.location.pathname);
     }
     await PR_READY;
-    const key = localStorage.getItem('claude_api_key');
-    if (!key) { this.view = 'setup'; this.render(); return; }
+    // Niente più schermata della chiave all'avvio: se il server ha la sua
+    // chiave, il telefono non ne ha bisogno (vedi loadEmails)
     await this.loadEmails();
     if (!PR) { this.error = 'Listino prezzi non caricato: ricarica la pagina prima di fare preventivi.'; this.render(); }
     setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
@@ -2183,7 +2456,7 @@ class ACME {
     if (this.view !== 'dashboard') return;
     try {
       const res = await fetch('/api/emails-analyzed', {
-        headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
+        headers: { ...claudeHeaders() }
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -2208,9 +2481,13 @@ class ACME {
     this.render();
     try {
       const res = await fetch('/api/emails-analyzed', {
-        headers: { 'x-claude-key': localStorage.getItem('claude_api_key') }
+        headers: { ...claudeHeaders() }
       });
       if (res.status === 401) { this.view = 'login'; this.render(); return; }
+      if (res.status === 400) {
+        const d = await res.clone().json().catch(() => ({}));
+        if (d.error === 'Claude API key required') { this.view = 'setup'; this.render(); return; }
+      }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Errore nel caricamento');
@@ -2876,6 +3153,7 @@ Domus 106`;
       const past = new Date(qs.checkIn + 'T00:00:00') < t0;
       previewEl.innerHTML = `
         ${past ? `<div class="discrepancy-banner" style="margin-bottom:12px;">La data di arrivo è già passata: controlla il check-in.</div>` : ''}
+        ${q.belowMinimum ? `<div class="discrepancy-banner" style="margin-bottom:12px;">Sotto il soggiorno minimo di ${q.minNights} notti per questo periodo.</div>` : ''}
         ${this.renderConflicts(qs)}
         ${rows}
         ${q.rooms === 2 ? `<div class="detail-row"><span class="label">Seconda camera · ${q.nights} notti</span>${EUR(q.secondRoomNightly)}</div>
@@ -2906,7 +3184,7 @@ Domus 106`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-claude-key': localStorage.getItem('claude_api_key')
+          ...claudeHeaders()
         },
         body: JSON.stringify({
           action: 'message',
@@ -3302,7 +3580,7 @@ Domus 106`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-claude-key': localStorage.getItem('claude_api_key')
+          ...claudeHeaders()
         },
         body: JSON.stringify({ from: email.from, subject: email.subject, body: email.body })
       });
@@ -3367,7 +3645,7 @@ Domus 106`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-claude-key': localStorage.getItem('claude_api_key')
+          ...claudeHeaders()
         },
         body: JSON.stringify({
           subject: e.subject,
@@ -3488,6 +3766,11 @@ Domus 106`;
     this.render();
   }
 
+  useServerKey() {
+    localStorage.removeItem('claude_api_key');
+    this.loadEmails();
+  }
+
   resetKey() {
     localStorage.removeItem('claude_api_key');
     this.view = 'setup';
@@ -3517,9 +3800,10 @@ Domus 106`;
       <div class="topbar"><div class="eyebrow">Configurazione</div><h1>ACME</h1></div>
       <div class="login-box" style="text-align:left; padding: 20px 4px;">
         <h2>Chiave Claude API</h2>
-        <p>Serve una sola volta. Resta salvata sul dispositivo.</p>
+        <p>Il server non ha una chiave propria. Inseriscila qui (resta salvata solo su questo telefono), oppure aggiungi ANTHROPIC_API_KEY nelle variabili di Vercel e non servirà più.</p>
         <input class="key-input" id="keyInput" type="password" placeholder="sk-ant-...">
         <button class="btn-primary" onclick="app.saveKey()">Continua</button>
+        <button class="btn btn-secondary" style="width:100%; margin-top:10px;" onclick="app.useServerKey()">Usa la chiave del server</button>
       </div>`;
   }
 
@@ -3609,11 +3893,11 @@ Domus 106`;
 
       <div class="section-title">Gestione</div>
       <div class="settings-card">
-        ${row('app.openStandaloneQuote()', 'doc', 'Genera preventivo', true)}
+        ${row('app.openStandaloneQuote()', 'doc', 'Preventivo e prenotazione', true)}
         ${row('app.openBookingsList()', 'calendar', 'Prenotazioni confermate', true)}
         ${row('app.openBookingHistory()', 'archive', 'Storico prenotazioni', true)}
         ${row('app.openStatistics()', 'chart', 'Statistiche', true)}
-        ${row('app.openCalendarSettings()', 'calendar', 'Calendari Booking e Airbnb', true)}
+        ${row('app.openCalendarSettings()', 'key', 'Calendari e info per gli ospiti', true)}
       </div>
 
       <div class="refresh-row">
@@ -3621,13 +3905,20 @@ Domus 106`;
         <button class="icon-btn" onclick="app.loadEmails()" title="Aggiorna">${this.icon('refresh')}</button>
       </div>
       <div class="settings-card">
-        ${row('app.resetKey()', 'key', 'Cambia chiave API')}
         ${row('app.reconnectGmail()', 'mail', 'Riconnetti Gmail')}
         ${row('app.togglePushNotifications()', this.pushEnabled ? 'bellOff' : 'bell', this.pushEnabled ? 'Disattiva notifiche' : 'Attiva notifiche')}
         ${row('app.setCleanerEmail()', 'broom', 'Email colf/pulizie')}
         ${row('app.reportProblem()', 'bug', 'Segnala un problema')}
-        ${row('app.openTestLab()', 'flask', 'Laboratorio di test')}
-      </div>`;
+      </div>
+      <!-- Strumenti tecnici fuori dalla vista di tutti i giorni (prima il
+           laboratorio, con il suo "Reset totale", era tra le voci normali) -->
+      <details class="advanced">
+        <summary>Avanzate <span class="chevron">${ICON('chev')}</span></summary>
+        <div class="settings-card" style="margin-top:8px;">
+          ${row('app.resetKey()', 'key', 'Chiave API di Claude')}
+          ${row('app.openTestLab()', 'flask', 'Laboratorio di test')}
+        </div>
+      </details>`;
   }
 
   renderEmails() {
