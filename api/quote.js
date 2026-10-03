@@ -141,7 +141,7 @@ ISTRUZIONI:
     });
   }
 
-  const { to, emailMessage } = req.body;
+  const { to, emailMessage, threadId, inReplyTo, replySubject } = req.body;
   const input = quoteInput(req.body);
   const guestName = input.guestName;
   if (!to || !guestName || !input.checkIn || !input.checkOut) {
@@ -163,13 +163,21 @@ Resto a disposizione per qualsiasi chiarimento.
 Cordiali saluti,
 Domus 106`;
 
-    const subject = `Preventivo soggiorno Domus 106 — ${checkInFmt}`;
+    // Se il preventivo risponde a un'email dell'ospite, resta nella stessa
+    // conversazione: stesso oggetto con "Re:", In-Reply-To/References e threadId.
+    const replyRef = typeof inReplyTo === 'string' && /^<[^<>\r\n]+>$/.test(inReplyTo.trim()) ? inReplyTo.trim() : null;
+    const threaded = !!(replyRef && replySubject);
+    const cleanReplySubject = String(replySubject || '').replace(/[\r\n]+/g, ' ');
+    const subject = threaded
+      ? (/^\s*re\s*:/i.test(cleanReplySubject) ? cleanReplySubject : 'Re: ' + cleanReplySubject)
+      : `Preventivo soggiorno Domus 106 — ${checkInFmt}`;
     const encodedSubject = '=?UTF-8?B?' + Buffer.from(subject, 'utf-8').toString('base64') + '?=';
     const boundary = 'acme_boundary_' + Date.now();
 
     const message = [
       `To: ${to}`,
       `Subject: ${encodedSubject}`,
+      ...(threaded ? [`In-Reply-To: ${replyRef}`, `References: ${replyRef}`] : []),
       'MIME-Version: 1.0',
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
       '',
@@ -194,7 +202,7 @@ Domus 106`;
     const sendResponse = await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw: encodedMessage })
+      body: JSON.stringify(threaded && threadId ? { raw: encodedMessage, threadId } : { raw: encodedMessage })
     });
 
     if (!sendResponse.ok) {

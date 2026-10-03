@@ -110,8 +110,8 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && req.query.availability === '1') {
     const { checkIn, checkOut, excludeId } = req.query;
     if (!checkIn || !checkOut || checkOut <= checkIn) return res.status(400).json({ error: 'Date non valide' });
-    const { ranges, errors } = await getOccupied({ from: checkIn, to: checkOut, excludeBookingId: excludeId });
-    return res.status(200).json({ conflicts: conflictsWith(ranges, checkIn, checkOut), errors });
+    const { ranges, errors, checked } = await getOccupied({ from: checkIn, to: checkOut, excludeBookingId: excludeId });
+    return res.status(200).json({ conflicts: conflictsWith(ranges, checkIn, checkOut), errors, checked });
   }
 
   // Il database ha già le colonne nuove (camere, incassato)?
