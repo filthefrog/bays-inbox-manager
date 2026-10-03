@@ -6,7 +6,7 @@ import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
 // ogni 5 minuti. Fa il minimo indispensabile per restare economico:
 // - analizza con Claude SOLO le email mai viste prima (stessa cache di sempre)
 // - se non c'è nessuna email nuova, non chiama Claude nemmeno una volta
-// - una volta al giorno, verso le 14:00 ora italiana, controlla anche se ci
+// - una volta al giorno, dalle 14:00 ora italiana, controlla anche se ci
 //   sono check-out in giornata e manda un promemoria push (indipendente da
 //   Gmail: se Gmail ha un problema, questo controllo funziona comunque)
 
@@ -27,35 +27,49 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY mancante nelle variabili Vercel' });
   }
 
-  // --- Promemoria check-out del giorno (~14:00 ora italiana) ---------------
-  // Indipendente dal resto: gira anche se Gmail non è raggiungibile. La
-  // finestra hourPart===14 && minutePart<5 fa sì che, girando ogni 5 minuti,
-  // scatti una volta sola al giorno (il primo passaggio tra le 14:00 e le 14:04).
+  // --- Promemoria check-out del giorno (dalle 14:00 ora italiana) ----------
+  // Indipendente dal resto: gira anche se Gmail non è raggiungibile. Prima
+  // scattava solo se il controllo cadeva tra le 14:00 e le 14:04, ma GitHub
+  // Actions ritarda spesso i cron di parecchi minuti e il promemoria saltava.
+  // Ora parte al primo controllo dopo le 14:00 e la data dell'ultimo invio
+  // resta su Supabase, così arriva una volta sola al giorno.
   let checkoutReminder = { attempted: false, sent: 0 };
   try {
-    const romeParts = new Intl.DateTimeFormat('it-IT', {
-      timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false
-    }).formatToParts(new Date());
-    const hourPart = Number(romeParts.find(p => p.type === 'hour').value);
-    const minutePart = Number(romeParts.find(p => p.type === 'minute').value);
+    const hourPart = Number(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Rome', hour: '2-digit', hour12: false
+    }).format(new Date()));
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
+    const headers = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
 
-    if (hourPart === 14 && minutePart < 5) {
-      checkoutReminder.attempted = true;
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome' }).format(new Date());
-      const bookingsResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=guest_name,code&check_out=eq.${today}&status=neq.cancellata&status=neq.conclusa`,
-        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-      );
-      const checkoutsToday = bookingsResp.ok ? await bookingsResp.json() : [];
-      if (checkoutsToday.length > 0) {
-        await sendPushToAll({
-          title: checkoutsToday.length === 1
-            ? `Check-out oggi: ${checkoutsToday[0].guest_name}`
-            : `${checkoutsToday.length} check-out oggi`,
-          body: checkoutsToday.map(b => `${b.guest_name}${b.code ? ' (' + b.code + ')' : ''}`).join(', '),
-          url: '/'
-        }).catch(() => {});
-        checkoutReminder.sent = checkoutsToday.length;
+    if (hourPart >= 14 && hourPart < 22) {
+      const lastResp = await fetch(`${SUPABASE_URL}/rest/v1/app_state?id=eq.checkout_reminder_date&select=value`, { headers });
+      const lastRows = lastResp.ok ? await lastResp.json() : [];
+      const alreadySent = lastResp.ok && lastRows[0] && lastRows[0].value === today;
+
+      if (lastResp.ok && !alreadySent) {
+        checkoutReminder.attempted = true;
+        const bookingsResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=guest_name,code&check_out=eq.${today}&status=neq.cancellata&status=neq.conclusa`,
+          { headers }
+        );
+        if (bookingsResp.ok) {
+          const checkoutsToday = await bookingsResp.json();
+          if (checkoutsToday.length > 0) {
+            await sendPushToAll({
+              title: checkoutsToday.length === 1
+                ? `Check-out oggi: ${checkoutsToday[0].guest_name}`
+                : `${checkoutsToday.length} check-out oggi`,
+              body: checkoutsToday.map(b => `${b.guest_name}${b.code ? ' (' + b.code + ')' : ''}`).join(', '),
+              url: '/'
+            }).catch(() => {});
+            checkoutReminder.sent = checkoutsToday.length;
+          }
+          await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+            body: JSON.stringify({ id: 'checkout_reminder_date', value: today })
+          }).catch(() => {});
+        }
       }
     }
   } catch (err) {

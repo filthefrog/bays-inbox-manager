@@ -1,3 +1,5 @@
+import { requireAuth } from '../lib/auth.js';
+
 export default async function handler(req, res) {
   // Logout assorbito qui da api-logout.js (era 4 righe, non aveva senso come
   // funzione serverless a sé) — GET /api/auth?action=logout
@@ -15,6 +17,7 @@ export default async function handler(req, res) {
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
   if (req.query.action === 'get-cleaner-email') {
+    if (!(await requireAuth(req, res))) return;
     if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(200).json({ cleanerEmail: null });
     try {
       const resp = await fetch(`${SUPABASE_URL}/rest/v1/app_state?id=eq.cleaner_email&select=value`, {
@@ -29,9 +32,10 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST' && req.query.action === 'save-cleaner-email') {
     if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(500).json({ error: 'Supabase non configurato' });
+    if (!(await requireAuth(req, res))) return;
     const { cleanerEmail } = req.body || {};
     try {
-      await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,6 +45,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({ id: 'cleaner_email', value: cleanerEmail || '' })
       });
+      if (!resp.ok) return res.status(500).json({ error: 'Errore Supabase: ' + (await resp.text()).slice(0, 200) });
       return res.status(200).json({ success: true });
     } catch (err) {
       return res.status(500).json({ error: err.message });

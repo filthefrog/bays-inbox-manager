@@ -61,9 +61,9 @@ export default async function handler(req, res) {
     }
     res.setHeader("Set-Cookie", cookies);
 
-    // Reindirizza alla dashboard, includendo temporaneamente lo scope ottenuto per debug
-    const debugScope = encodeURIComponent(tokenData.scope || 'nessuno scope restituito');
-    return res.redirect(`/?debug_scope=${debugScope}`);
+    // Reindirizza alla dashboard. Prima aggiungeva ?debug_scope=… e l'app
+    // mostrava a ogni login un banner rosso "DEBUG scope ricevuto da Google".
+    return res.redirect('/');
   } catch (error) {
     console.error("Error:", error);
     return res.status(500).json({ error: error.message });

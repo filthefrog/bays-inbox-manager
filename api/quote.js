@@ -135,7 +135,7 @@ ISTRUZIONI:
 
 in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${quote.nights} nott${quote.nights === 1 ? 'e' : 'i'}).
 
-Totale soggiorno: € ${quote.total.toFixed(2)}${quote.discountPercent > 0 ? ` (sconto ${quote.discountPercent}% per soggiorni lunghi già applicato)` : ''}
+Totale soggiorno: € ${quote.total.toLocaleString('it-IT', { minimumFractionDigits: quote.total % 1 ? 2 : 0, maximumFractionDigits: 2, useGrouping: 'always' })}${quote.discountPercent > 0 ? ` (sconto ${quote.discountPercent}% per soggiorni lunghi già applicato)` : ''}
 
 Resto a disposizione per qualsiasi chiarimento.
 

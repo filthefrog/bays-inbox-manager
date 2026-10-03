@@ -1,7 +1,10 @@
+import { requireAuth } from '../lib/auth.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  if (!(await requireAuth(req, res))) return;
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -18,7 +21,7 @@ export default async function handler(req, res) {
 
   try {
     const resp = await fetch(
-      `${SUPABASE_URL}/rest/v1/analyzed_emails?id=eq.${emailId}`,
+      `${SUPABASE_URL}/rest/v1/analyzed_emails?id=eq.${encodeURIComponent(emailId)}`,
       {
         method: 'PATCH',
         headers: {

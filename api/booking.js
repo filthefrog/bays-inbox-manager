@@ -4,6 +4,12 @@
 // PATCH  -> aggiorna stato/note di una prenotazione esistente
 // DELETE -> rimuove una prenotazione (es. se poi viene cancellata)
 
+import { requireAuth, romeDate } from '../lib/auth.js';
+
+// Testo sicuro per un campo .ics (RFC 5545): niente a capo, virgole o punti e
+// virgola "nudi", altrimenti il Calendario scarta o tronca l'evento.
+const icsText = (s) => String(s).replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/[,;]/g, m => '\\' + m);
+
 function generateBookingCode(checkInStr) {
   // Formato: D106-MMDD-XXXX — leggibile, comunicabile a voce, nessun contatore
   // condiviso da sincronizzare (evita collisioni tra richieste simultanee).
@@ -32,7 +38,7 @@ export default async function handler(req, res) {
       return res.status(400).send('Dati mancanti per generare l\'evento (nome ospite, check-in e check-out sono obbligatori)');
     }
     const fmtDate = (d) => (d || '').replace(/-/g, '');
-    const uid = `acme-${checkIn}-${guestName.replace(/\s+/g, '')}-${Date.now()}@domus106`;
+    const uid = `acme-${checkIn}-${guestName.replace(/[^A-Za-z0-9]+/g, '')}-${Date.now()}@domus106`;
     const dtstamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     const paymentLabel = paymentStatus === 'saldata' ? 'Saldata'
       : paymentStatus === 'acconto versato' ? 'Acconto versato' : 'DA SALDARE';
@@ -45,18 +51,24 @@ export default async function handler(req, res) {
     if (code) descParts.push('Codice: ' + code);
     if (notes) descParts.push('Note: ' + notes);
     descParts.push('Creato da ACME Inbox Manager');
+    // L'evento si genera solo dai parametri della richiesta: non legge dati
+    // salvati, per questo resta accessibile senza login (l'apertura dal
+    // Calendario del telefono non porta con sé i cookie dell'app).
     const lines = [
       'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Domus 106//ACME//IT', 'CALSCALE:GREGORIAN',
       'BEGIN:VEVENT', `UID:${uid}`, `DTSTAMP:${dtstamp}`,
       `DTSTART;VALUE=DATE:${fmtDate(checkIn)}`, `DTEND;VALUE=DATE:${fmtDate(checkOut)}`,
-      `SUMMARY:${paymentBadge} ${guestName} — Domus 106 (${paymentLabel})`,
-      `DESCRIPTION:${descParts.join('\\n')}`,
+      `SUMMARY:${icsText(`${paymentBadge} ${guestName} — Domus 106 (${paymentLabel})`)}`,
+      `DESCRIPTION:${descParts.map(icsText).join('\\n')}`,
       'END:VEVENT', 'END:VCALENDAR'
     ];
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="prenotazione.ics"');
     return res.status(200).send(lines.join('\r\n'));
   }
+
+  // Tutto il resto legge o modifica le prenotazioni: solo per chi ha fatto login.
+  if (!(await requireAuth(req, res))) return;
 
   // Preventivo "in sospeso" collegato a un'email ospite — salvato quando si
   // invia un preventivo, letto quando si riapre una mail successiva dello
@@ -80,10 +92,7 @@ export default async function handler(req, res) {
   // saldare" con check-in vicino o già passato).
   if (req.method === 'GET' && req.query.reminders === '1') {
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const soon = new Date();
-      soon.setDate(soon.getDate() + 2);
-      const soonStr = soon.toISOString().slice(0, 10);
+      const soonStr = romeDate(2);
 
       const cleanerResp = await fetch(
         `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=id,guest_name,check_out,code&status=eq.conclusa&cleaner_notified=eq.true&cleaner_confirmed=eq.false&order=check_out.desc`,
@@ -147,7 +156,7 @@ export default async function handler(req, res) {
         // Prenotazioni il cui check-out è arrivato (oggi o prima), non ancora
         // rivisitate e non cancellate — usate per il pop-up "Com'è andato il
         // soggiorno?" che compare all'apertura dell'app.
-        const today = new Date().toISOString().slice(0, 10);
+        const today = romeDate();
         path = `confirmed_bookings?select=*&check_out=lte.${today}&status=neq.cancellata&or=(checkout_reviewed.is.null,checkout_reviewed.eq.false)&order=check_out.asc`;
       } else if (guestEmail) {
         // Storico dell'ospite: soggiorni precedenti con questa email, i più
@@ -253,7 +262,11 @@ export default async function handler(req, res) {
           return res.status(200).json({ success: true, booking: created[0] });
         }
         const detail = await resp.text();
-        if (detail.includes('duplicate key') || detail.toLowerCase().includes('code')) {
+        // 23505 = violazione di unicità (codice già usato). Prima bastava che
+        // l'errore contenesse la parola "code" — cioè qualsiasi errore Supabase,
+        // che riporta sempre un campo "code" — e ogni guasto diventava un finto
+        // "impossibile generare un codice univoco".
+        if (detail.includes('23505') || detail.includes('duplicate key')) {
           lastError = detail;
           continue; // collisione sul codice: rigenera e riprova
         }
@@ -304,10 +317,11 @@ export default async function handler(req, res) {
   // un soggiorno futuro non collegato.
   if (req.method === 'DELETE' && req.body && req.body.deletePendingQuoteEmail) {
     try {
-      await fetch(`${SUPABASE_URL}/rest/v1/pending_quotes?guest_email=eq.${encodeURIComponent(req.body.deletePendingQuoteEmail)}`, {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/pending_quotes?guest_email=eq.${encodeURIComponent(req.body.deletePendingQuoteEmail)}`, {
         method: 'DELETE',
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
       });
+      if (!resp.ok) return res.status(500).json({ error: 'Errore Supabase: ' + (await resp.text()).slice(0, 200) });
       return res.status(200).json({ success: true });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -318,10 +332,11 @@ export default async function handler(req, res) {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id mancante' });
     try {
-      await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
       });
+      if (!resp.ok) return res.status(500).json({ error: 'Errore Supabase: ' + (await resp.text()).slice(0, 200) });
       return res.status(200).json({ success: true });
     } catch (err) {
       return res.status(500).json({ error: err.message });

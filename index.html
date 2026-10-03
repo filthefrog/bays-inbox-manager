@@ -376,6 +376,8 @@
   .form-label { font-size: 10.5px; color: var(--text-secondary); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; display: block; }
   .quote-preview { background: var(--bg); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px; border: 1px solid var(--border); }
   .quote-preview .detail-row:last-child { margin-bottom: 0; }
+  .quote-preview:empty { display: none; }
+  a[onclick] { white-space: nowrap; }
 
   .error-banner { background: rgba(240,40,60,0.08); color: var(--red); border-left: 3px solid var(--red); padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; }
 
@@ -399,6 +401,45 @@
   }
   .settings-row .settings-label { flex: 1; font-size: 15px; font-weight: 500; color: var(--text); }
   .settings-row .settings-chevron { color: var(--gray); font-size: 18px; }
+  /* Icone dentro pulsanti, chip e righe */
+  .btn, .btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+  .btn svg.i, .btn-primary svg.i { width: 17px; height: 17px; }
+  .chip svg.i { width: 12px; height: 12px; stroke-width: 2.2; }
+  .ready-badge svg.i { width: 12px; height: 12px; stroke-width: 2.4; }
+  .dismiss-btn svg.i, .flag-btn svg.i { width: 14px; height: 14px; stroke-width: 2.2; }
+  .test-toggle { display: flex; align-items: center; justify-content: center; }
+  .test-toggle svg.i { width: 18px; height: 18px; stroke-width: 2.2; }
+  .test-auto svg.i, .sent-confirm svg.i { width: 14px; height: 14px; stroke-width: 2.2; vertical-align: -2px; }
+  .booking-row .name svg.i { width: 16px; height: 16px; vertical-align: -3px; }
+  .m-chev svg.i, .settings-chevron svg.i, .booking-disclosure .chevron svg.i { width: 16px; height: 16px; color: var(--gray); }
+  .booking-disclosure summary .settings-icon-badge { width: 30px; height: 30px; }
+  .btn-warn { background: var(--amber); color: white; }
+  .info-banner { background: rgba(26,115,240,0.08); color: #0f4fae; border-left-color: var(--blue); }
+  a[onclick] { color: var(--text); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  a[onclick] svg.i { width: 14px; height: 14px; }
+
+  /* Dialoghi: icona in un cerchio colorato */
+  .confirm-box .icon { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; background: var(--card); color: var(--text); }
+  .confirm-box .icon svg.i { width: 26px; height: 26px; }
+  .confirm-box .icon.dlg-green { background: rgba(0,184,107,0.12); color: var(--green); }
+  .confirm-box .icon.dlg-amber { background: rgba(229,168,0,0.14); color: #a87b00; }
+  .confirm-box .icon.dlg-red { background: rgba(240,40,60,0.1); color: var(--red); }
+  .confirm-box .icon.dlg-blue { background: rgba(26,115,240,0.1); color: var(--blue); }
+  .confirm-box textarea.form-input { margin-bottom: 14px; }
+
+  /* Statistiche e numeri grandi */
+  .stat-card { cursor: pointer; transition: transform 0.15s ease; }
+  .stat-card:active { transform: scale(0.98); }
+  .stat-big { font-family: var(--display); font-size: 44px; font-weight: 700; line-height: 1; margin-top: 14px; }
+  .stat-cap { font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-secondary); margin-top: 4px; }
+  .occ { height: 6px; border-radius: 3px; background: rgba(11,12,14,0.07); margin: 16px 0 14px; overflow: hidden; }
+  .occ-fill { height: 100%; border-radius: 3px; background: var(--green); }
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .stat-grid b, .stat-trio b { display: block; font-family: var(--display); font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat-grid b small { font-size: 15px; color: var(--text-secondary); font-weight: 600; }
+  .stat-grid span, .stat-trio span { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); margin-top: 5px; }
+  .stat-trio { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
+  .stat-trio b { font-size: 36px; }
 </style>
 </head>
 <body>
@@ -406,15 +447,65 @@
   <div id="confirmOverlay" class="confirm-overlay hidden"></div>
 
 <script>
+// Icone a linea (24×24) usate in tutta l'app al posto delle emoji
+const ICONS = {
+  bell: '<path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 004 0"/>',
+  bellOff: '<path d="M8.5 5.5A6 6 0 0118 11v3.5M6 11v5l-1.5 2H17"/><path d="M10 20.5a2 2 0 004 0"/><path d="M3 3l18 18"/>',
+  doc: '<path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7z"/><path d="M14 3v4h4"/><path d="M9 13h6M9 17h4"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9M10 13h4"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/>',
+  broom: '<path d="M14 4l6 6"/><path d="M17 7l-6 6"/><path d="M11 13c-3-1-6 1-7 7 6-1 8-4 7-7z"/>',
+  bug: '<rect x="7" y="8" width="10" height="12" rx="5"/><path d="M12 8v12M9 5l1.5 3M15 5l-1.5 3M3 13h4M17 13h4M4 19l3-2M20 19l-3-2"/>',
+  flask: '<path d="M9 3h6M10 3v6L4.5 19a1.3 1.3 0 001.1 2h12.8a1.3 1.3 0 001.1-2L14 9V3"/><path d="M7 15h10"/>',
+  refresh: '<path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  alert: '<path d="M12 3.5L2.5 20h19z"/><path d="M12 10v4.5M12 17.5v.01"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>',
+  share: '<path d="M12 15V3M7.5 7.5L12 3l4.5 4.5"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/>',
+  copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h3"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13M9 7V4h6v3"/>',
+  wrench: '<path d="M14.5 5.5a4 4 0 00-5.2 5.2L4 16v4h4l5.3-5.3a4 4 0 005.2-5.2l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  note: '<path d="M4 20h4L19 9a2.8 2.8 0 00-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+  clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h4"/>',
+  phone: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  circle: '<circle cx="12" cy="12" r="8"/>',
+  euro: '<path d="M17 6.5A7 7 0 007.5 12 7 7 0 0017 17.5M4 10h9M4 14h9"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/>'
+};
+// Importi in formato italiano: € 1.785 (senza ",00" se interi), € 127,50
+function EUR(n) {
+  const v = Number(n) || 0;
+  const d = Math.round(v * 100) % 100 === 0 ? 0 : 2;
+  return '€ ' + v.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: 'always' });
+}
+function ICON(name, cls) {
+  return `<svg class="i${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+// Icona grande e colorata dei dialoghi
+function DLG(name, tone) { return `<div class="icon dlg-${tone || 'neutral'}">${ICON(name)}</div>`; }
+
 const CATEGORY_META = {
-  'Lamentela':               { icon: '⚠️', color: 'red', label: 'Lamentela' },
-  'Da verificare':           { icon: '🔍', color: 'amber', label: 'Da verificare' },
-  'Prenotazione':            { icon: '📅', color: 'blue', label: 'Richieste prenotazioni' },
-  'Problema tecnico':        { icon: '🔧', color: 'orange', label: 'Problema tecnico' },
-  'Fatturazione':            { icon: '💳', color: 'purple', label: 'Fatturazione' },
-  'Richiesta informazioni':  { icon: '❓', color: 'teal', label: 'Richiesta informazioni' },
-  'Complimento':             { icon: '⭐', color: 'green', label: 'Complimento' },
-  'Cancellazione':           { icon: '❌', color: 'gray', label: 'Cancellazione' }
+  'Lamentela':               { color: 'red', label: 'Lamentela' },
+  'Da verificare':           { color: 'amber', label: 'Da verificare' },
+  'Prenotazione':            { color: 'blue', label: 'Richieste prenotazioni' },
+  'Problema tecnico':        { color: 'orange', label: 'Problema tecnico' },
+  'Fatturazione':            { color: 'purple', label: 'Fatturazione' },
+  'Richiesta informazioni':  { color: 'teal', label: 'Richiesta informazioni' },
+  'Complimento':             { color: 'green', label: 'Complimento' },
+  'Cancellazione':           { color: 'gray', label: 'Cancellazione' }
 };
 
 const BOOKING_STATUSES = ['confermata', 'in arrivo', 'conclusa', 'cancellata'];
@@ -601,14 +692,17 @@ class ACME {
       const [y, mm] = k.split('-');
       const monthLabel = this.capitalize(new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }));
       return `
-        <div class="detail-card" style="cursor:pointer;" onclick="app.openStatsMonth('${k}')">
-          <div class="section-title" style="margin:0 0 10px;">${monthLabel}</div>
-          <div class="detail-row"><span class="label">Incasso</span><b>€ ${m.revenue.toFixed(2)}</b></div>
-          <div class="detail-row"><span class="label">Notti prenotate</span>${m.nights} / ${capacity}</div>
-          <div class="detail-row"><span class="label">Occupazione</span>${occupancy}%</div>
-          <div class="detail-row"><span class="label">Soggiorni totali</span>${m.totalStays}</div>
-          ${m.problemStays > 0 ? `<div class="detail-row"><span class="label">Con note/problemi</span>${m.problemStays}</div>` : ''}
-          <div style="font-size:12px; color:var(--accent); font-weight:600; margin-top:8px;">Vedi tutti i clienti ›</div>
+        <div class="detail-card stat-card" onclick="app.openStatsMonth('${k}')">
+          <div class="row-top"><div class="section-title" style="margin:0;">${monthLabel}</div><span class="m-chev">${ICON('chev')}</span></div>
+          <div class="stat-big">${EUR(m.revenue)}</div>
+          <div class="stat-cap">Incasso</div>
+          <div class="occ"><div class="occ-fill" style="width:${occupancy}%"></div></div>
+          <div class="stat-grid">
+            <div><b>${occupancy}%</b><span>Occupazione</span></div>
+            <div><b>${m.nights}<small>/${capacity}</small></b><span>Notti</span></div>
+            <div><b>${m.totalStays}</b><span>Soggiorni</span></div>
+            ${m.problemStays > 0 ? `<div><b class="c-amber">${m.problemStays}</b><span>Con note</span></div>` : ''}
+          </div>
         </div>`;
     }).join('');
 
@@ -643,14 +737,14 @@ class ACME {
         <div class="booking-row" onclick='app.openBookingDetail(${safeBooking})'>
           <div class="row-top">
             <div class="name">${this.escape(b.guest_name)}</div>
-            ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+            ${b.total ? `<div class="total">${EUR(b.total)}</div>` : ''}
           </div>
-          ${b.rate_per_night ? `<div class="rate-info">€ ${Number(b.rate_per_night).toFixed(2)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
+          ${b.rate_per_night ? `<div class="rate-info">${EUR(b.rate_per_night)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
           <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
           <div class="chip-row">
             <span class="chip ${statusClass}">${this.escape(status)}</span>
             <span class="chip ${paymentClass}">${paymentLabel}</span>
-            ${b.guests ? `<span class="chip chip-guests">👤 ${b.guests}</span>` : ''}
+            ${b.guests ? `<span class="chip chip-guests">${ICON('user')} ${b.guests}</span>` : ''}
             <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
           </div>
         </div>`;
@@ -670,9 +764,13 @@ class ACME {
     try {
       const res = await fetch('/api/booking');
       const data = await res.json().catch(() => ({}));
-      if (res.ok) this.bookings = data.bookings || [];
+      // Prima un errore del server mostrava "Nessuna prenotazione": sembrava
+      // che l'archivio fosse vuoto.
+      if (!res.ok) throw new Error(data.error || 'Impossibile caricare le prenotazioni');
+      this.bookings = data.bookings || [];
+      this.error = null;
     } catch (e) {
-      this.error = 'Impossibile caricare le prenotazioni';
+      this.error = e.message || 'Impossibile caricare le prenotazioni';
     }
     this.bookingsLoading = false;
     this.render();
@@ -685,12 +783,15 @@ class ACME {
     try {
       const res = await fetch('/api/booking?reminders=1');
       const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
       this.reminders = {
         cleanerPending: data.cleanerPending || [],
         paymentPending: data.paymentPending || []
       };
     } catch (e) {}
-    this.render();
+    // Solo dove i promemoria si vedono: ridisegnare altre schermate mentre si
+    // scrive (risposta, preventivo) toglieva il cursore dal campo.
+    if (this.view === 'dashboard' || this.view === 'reminders') this.render();
   }
 
   reminderCount() {
@@ -731,7 +832,7 @@ class ACME {
       if (action === 'campaign-start') {
         // la prima email è già arrivata: la mostro subito nella dashboard e dico com'è andata
         const ib = await this.refreshInboxQuiet();
-        t.message += ib.ok ? ` La dashboard ora mostra ${ib.seen} email di prova.` : ` ⚠️ La dashboard non si è aggiornata: ${ib.error}`;
+        t.message += ib.ok ? ` La dashboard ora mostra ${ib.seen} email di prova.` : ` Attenzione: la dashboard non si è aggiornata: ${ib.error}`;
       }
     } catch (e) {
       t.error = e.message;
@@ -746,7 +847,7 @@ class ACME {
       desc: 'La prima email di prova arriva subito, poi circa 5-6 al giorno tra le 8:30 e le 21:30, per 7 giorni. Controlla da solo se le classifica bene e se compaiono in dashboard; ogni sera ti arriva una notifica. Puoi fermarlo e azzerare tutto quando vuoi.',
       confirmLabel: 'Avvia',
       confirmColor: 'var(--accent)',
-      icon: '🗓️',
+      icon: 'calendar',
       onConfirm: () => this.campaignAction('campaign-start', 'Avvio del collaudo…', c => `Collaudo avviato: giorno 1 di ${c.totalDays}. La prima email è già arrivata.`)
     });
   }
@@ -756,7 +857,7 @@ class ACME {
       title: 'Terminare il collaudo?',
       desc: 'Le email di prova non arrivano più. I risultati raccolti restano nel report finché non fai il reset.',
       confirmLabel: 'Termina',
-      icon: '⏹️',
+      icon: 'stop',
       onConfirm: () => this.campaignAction('campaign-stop', 'Chiusura…', () => 'Collaudo terminato. Genera il report per vedere i risultati.')
     });
   }
@@ -777,32 +878,32 @@ class ACME {
     if (!c) {
       return `
         <div class="detail-card">
-          <div class="section-title" style="margin:0 0 8px;">🗓️ Collaudo di 7 giorni</div>
+          <div class="section-title" style="margin:0 0 8px;">Collaudo di 7 giorni</div>
           <div style="font-size:13px; color:var(--text-secondary); line-height:1.5;">Per una settimana l'app riceve da sola email di prova a intervalli diversi durante il giorno (circa 5-6 al giorno). Controlla in automatico se le classifica bene, se compaiono in dashboard e se il controllo ogni 5 minuti gira senza saltare giri. Ogni sera ti arriva una notifica e alla fine il report.</div>
-          <button class="btn btn-send" style="width:100%; margin-top:12px;" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStart()">▶️ Avvia il collaudo di 7 giorni</button>
+          <button class="btn btn-send" style="width:100%; margin-top:12px;" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStart()">Avvia il collaudo di 7 giorni</button>
         </div>`;
     }
     const state = !c.active ? (c.finishedAt ? 'terminato' : 'fermo') : (c.paused ? 'in pausa' : 'attivo');
     const errors = (c.issues || []).filter(i => i.severity === 'errore').length;
     const warns = (c.issues || []).filter(i => i.severity !== 'errore').length;
     const days = (c.byDay || []).map(d => `
-      <div class="test-auto" style="color:var(--text);">${new Date(d.date + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}: ${d.injected} mail, ${d.correct}/${d.analyzed} giuste${d.missed ? ', ' + d.missed + ' non viste in dashboard' : ''}${d.maxGapMin > 30 ? ', ⚠️ buco del cron ' + d.maxGapMin + ' min' : ''}</div>`).join('');
+      <div class="test-auto" style="color:var(--text);">${new Date(d.date + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}: ${d.injected} mail, ${d.correct}/${d.analyzed} giuste${d.missed ? ', ' + d.missed + ' non viste in dashboard' : ''}${d.maxGapMin > 30 ? ', buco del cron ' + d.maxGapMin + ' min' : ''}</div>`).join('');
     return `
       <div class="detail-card">
-        <div class="row-top"><div class="section-title" style="margin:0;">🗓️ Collaudo di 7 giorni</div><span class="chip ${c.active && !c.paused ? 'chip-pay-saldata' : 'chip-code'}">${state}</span></div>
+        <div class="row-top"><div class="section-title" style="margin:0;">Collaudo di 7 giorni</div><span class="chip ${c.active && !c.paused ? 'chip-pay-saldata' : 'chip-code'}">${state}</span></div>
         <div style="font-size:22px; font-weight:700; margin:10px 0 2px;">Giorno ${c.day} di ${c.totalDays}</div>
         <div style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
           ${c.injected} email inserite · ${c.analyzed} analizzate · <b style="color:var(--text);">${c.correct} classificate bene${c.accuracyPct != null ? ' (' + c.accuracyPct + '%)' : ''}</b><br>
           Compaiono in dashboard: ${c.seenInDashboard} · <b style="color:${c.missed ? 'var(--red)' : 'var(--text)'};">non viste: ${c.missed}</b>${c.notAnalyzed ? ' · mai analizzate: ' + c.notAnalyzed : ''}<br>
           Controllo automatico: ${c.ticks.count} giri, ultimo alle ${hm(c.ticks.last)}, buco massimo ${c.ticks.maxGapMin} min${c.avgAnalysisMin != null ? '<br>Ritardo medio di analisi: ' + c.avgAnalysisMin + ' min' : ''}
           ${c.active && !c.paused ? '<br>Prossima email: intorno alle ' + hm(c.nextDueAt) : ''}
-          ${c.lastDashboardLoadAt ? '<br>Ultima apertura della dashboard: ' + dt(c.lastDashboardLoadAt) : '<br>⚠️ La dashboard non ha ancora comunicato di essere stata aperta'}
+          ${c.lastDashboardLoadAt ? '<br>Ultima apertura della dashboard: ' + dt(c.lastDashboardLoadAt) : '<br>Attenzione: la dashboard non ha ancora comunicato di essere stata aperta'}
         </div>
         <div style="font-size:13px; margin-top:8px;">${errors} errori, ${warns} avvisi rilevati dal collaudo</div>
         ${days ? '<details class="test-details"><summary>Giorno per giorno</summary>' + days + '</details>' : ''}
         <div class="btn-row" style="margin-top:12px;">
-          ${c.active ? `<button class="btn btn-secondary" ${busy ? 'disabled' : ''} onclick="app.campaignAction('campaign-toggle', 'Attendi…', x => x.paused ? 'Collaudo in pausa.' : 'Collaudo ripreso.')">${c.paused ? '▶️ Riprendi' : '⏸ Pausa'}</button>
-          <button class="btn btn-reject" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStop()">⏹ Termina</button>` : `<button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStart()">▶️ Nuovo collaudo</button>`}
+          ${c.active ? `<button class="btn btn-secondary" ${busy ? 'disabled' : ''} onclick="app.campaignAction('campaign-toggle', 'Attendi…', x => x.paused ? 'Collaudo in pausa.' : 'Collaudo ripreso.')">${c.paused ? 'Riprendi' : 'Pausa'}</button>
+          <button class="btn btn-reject" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStop()">Termina</button>` : `<button class="btn btn-send" ${busy ? 'disabled' : ''} onclick="app.confirmCampaignStart()">Nuovo collaudo</button>`}
         </div>
       </div>`;
   }
@@ -984,8 +1085,8 @@ class ACME {
 
   seedMessage(r, ib) {
     let msg = `${r.inserted} email inserite in Gmail (${r.inTop8} tra le 8 più recenti, quelle che la dashboard legge). `;
-    msg += ib.ok ? `Dashboard aggiornata: ne mostra ${ib.seen}.` : `⚠️ La dashboard non si è aggiornata: ${ib.error}`;
-    if (r.inTop8NoMe < r.inTop8) msg += ' ⚠️ Per il controllo automatico Gmail le considera «da te»: le push urgenti non partiranno per queste mail di prova.';
+    msg += ib.ok ? `Dashboard aggiornata: ne mostra ${ib.seen}.` : `Attenzione: la dashboard non si è aggiornata: ${ib.error}`;
+    if (r.inTop8NoMe < r.inTop8) msg += ' Attenzione: per il controllo automatico Gmail le considera «da te»: le push urgenti non partiranno per queste mail di prova.';
     return msg;
   }
 
@@ -1415,10 +1516,10 @@ class ACME {
   confirmCloseTestSession() {
     this.showConfirmDialog({
       title: 'Chiudere la sessione di test?',
-      desc: 'Genero il report e lo salvo nello storico. La sessione riparte da zero (le prove tornano ⚪); i dati di test restano finché non li elimini.',
+      desc: 'Genero il report e lo salvo nello storico. La sessione riparte da zero (le prove tornano da fare); i dati di test restano finché non li elimini.',
       confirmLabel: 'Chiudi e genera',
       confirmColor: 'var(--accent)',
-      icon: '📄',
+      icon: 'doc',
       onConfirm: () => this.closeTestSession()
     });
   }
@@ -1508,7 +1609,7 @@ class ACME {
       desc: 'Manda nel cestino Gmail le email di prova, cancella prenotazioni, preventivi e analisi di test, ferma e azzera il collaudo automatico e riparte da zero con le prove. I dati veri e i report già salvati non vengono toccati.',
       confirmLabel: 'Azzera tutto',
       onConfirm: () => this.testLabAction('cleanup', {}, 'Reset in corso…',
-        d => `Reset fatto: ${d.trashed} email, ${d.bookings} prenotazioni e ${d.quotes} preventivi di test eliminati; collaudo azzerato.` + (d.gmailSkipped ? ' ⚠️ Gmail non era raggiungibile: le email di prova restano nella posta. Riconnetti Gmail e ripeti il reset per toglierle.' : ''))
+        d => `Reset fatto: ${d.trashed} email, ${d.bookings} prenotazioni e ${d.quotes} preventivi di test eliminati; collaudo azzerato.` + (d.gmailSkipped ? ' Attenzione: Gmail non era raggiungibile: le email di prova restano nella posta. Riconnetti Gmail e ripeti il reset per toglierle.' : ''))
     });
   }
 
@@ -1524,7 +1625,7 @@ class ACME {
     }
     const busy = !!t.busy;
     const enc = (k) => encodeURIComponent(k).replace(/'/g, '%27');
-    const icon = (id) => { const e = this.testEffective(id); return e === 'ok' ? '✅' : (e === 'ko' ? '❌' : '⚪'); };
+    const icon = (id) => { const e = this.testEffective(id); return e === 'ok' ? `<span class="c-green">${ICON('check')}</span>` : (e === 'ko' ? `<span class="c-red">${ICON('x')}</span>` : `<span class="c-gray">${ICON('circle')}</span>`); };
 
     const card = (x, canInsert) => {
       const r = s.results[x.id] || {};
@@ -1537,8 +1638,8 @@ class ACME {
           </div>
           ${x.name ? `<div class="rate-info">da ${this.escape(x.name)}</div>` : ''}
           <ul class="test-checks">${x.checks.map(c => `<li>${this.escape(c)}</li>`).join('')}</ul>
-          ${autos.map(a => `<div class="test-auto ${a.ok ? 'ok' : 'ko'}">🤖 ${a.ok ? '✓' : '✗'} ${this.escape(a.detail || a.title)}</div>`).join('')}
-          ${r.note ? `<div class="test-note" onclick="app.editTestNote('${x.id}')">📝 ${this.escape(r.note)}</div>` : ''}
+          ${autos.map(a => `<div class="test-auto ${a.ok ? 'ok' : 'ko'}">${ICON(a.ok ? 'check' : 'x')} ${this.escape(a.detail || a.title)}</div>`).join('')}
+          ${r.note ? `<div class="test-note" onclick="app.editTestNote('${x.id}')">${ICON('note')} ${this.escape(r.note)}</div>` : ''}
           ${canInsert ? `<button class="btn btn-secondary" style="margin-top:10px; padding:8px;" ${busy ? 'disabled' : ''} onclick="app.testLabAction('seed-emails', {batch:'${x.id}'}, 'Inserisco…', (r, ib) => app.seedMessage(r, ib))">Inserisci solo questa</button>` : ''}
         </div>`;
     };
@@ -1558,8 +1659,8 @@ class ACME {
         <div class="section-title" style="margin-top:0;">${this.testReport.closed ? 'Report della sessione' : 'Anteprima del report'}</div>
         <textarea readonly class="form-input report-box">${this.escape(this.testReport.text)}</textarea>
         <div class="btn-row">
-          <button class="btn btn-send" onclick="app.shareTestReport()">📤 Condividi come file</button>
-          <button class="btn btn-secondary" onclick="app.copyTestReport()">📋 Copia testo</button>
+          <button class="btn btn-send" onclick="app.shareTestReport()">Condividi come file</button>
+          <button class="btn btn-secondary" onclick="app.copyTestReport()">Copia testo</button>
         </div>
         <button class="btn btn-reject" style="width:100%; margin-top:8px;" onclick="app.testReport = null; app.render()">Chiudi</button>
       </div>` : '';
@@ -1571,7 +1672,7 @@ class ACME {
         : this.testHistory.map((h, i) => `
           <div class="booking-row" onclick="app.openHistoryReport(${i})">
             <div class="name">${new Date(h.closedAt).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })}</div>
-            <div class="rate-info">✅ ${(h.summary || {}).ok || 0} · ❌ ${(h.summary || {}).ko || 0} · ${(h.summary || {}).errors || 0} errori</div>
+            <div class="rate-info">${(h.summary || {}).ok || 0} ok · ${(h.summary || {}).ko || 0} ko · ${(h.summary || {}).errors || 0} errori</div>
           </div>`).join('')}` : '';
 
     return `${head}
@@ -1582,11 +1683,11 @@ class ACME {
       ${reportPanel}
 
       <div class="detail-card" style="font-size:13px; line-height:1.5; color:var(--text-secondary);">
-        Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi tipo <b>marco@acmetest.example.com</b>, un dominio riservato che non esiste: nessuna persona reale può riceverli. Risposte e preventivi che l'app «invia» a loro vengono deviati nella tua inbox. Tocca il cerchio di una prova per segnarla ✅ o ❌ (con ❌ puoi scrivere cosa è successo). Tutto resta salvato anche per giorni.
+        Inserisce email finte nella tua inbox vera. Gli ospiti di prova hanno indirizzi tipo <b>marco@acmetest.example.com</b>, un dominio riservato che non esiste: nessuna persona reale può riceverli. Risposte e preventivi che l'app «invia» a loro vengono deviati nella tua inbox. Tocca il cerchio di una prova per segnarla riuscita o fallita (se fallita puoi scrivere cosa è successo). Tutto resta salvato anche per giorni.
       </div>
 
       <div class="detail-card" style="text-align:center;">
-        <div style="font-size:22px; font-weight:700;">${sum.ok} ✅ &nbsp; ${sum.ko} ❌ &nbsp; ${sum.todo} ⚪</div>
+        <div class="stat-trio"><div><b class="c-green">${sum.ok}</b><span>ok</span></div><div><b class="c-red">${sum.ko}</b><span>ko</span></div><div><b>${sum.todo}</b><span>da provare</span></div></div>
         <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Sessione aperta da ${days} giorni · ${sum.errors} errori, ${sum.warnings} avvisi · ora presenti: ${d.counts.emails} email e ${d.counts.bookings} prenotazioni di test</div>
       </div>
 
@@ -1595,31 +1696,31 @@ class ACME {
       <div class="section-title">Problemi aperti (${issues.length})</div>
       ${issues.length ? issues.map(it => `
         <div class="booking-row" style="padding-right:${it.removable ? 44 : 16}px;">
-          ${it.removable ? `<button class="dismiss-btn" onclick="app.removeFinding('${enc(it.key)}')">✕</button>` : ''}
-          <div class="name">${it.sev === 'errore' ? '❌' : '⚠️'} ${this.escape(it.title)}</div>
+          ${it.removable ? `<button class="dismiss-btn" onclick="app.removeFinding('${enc(it.key)}')">${ICON('x')}</button>` : ''}
+          <div class="name"><span class="${it.sev === 'errore' ? 'c-red' : 'c-amber'}">${ICON('alert')}</span> ${this.escape(it.title)}</div>
           <div class="rate-info">${this.escape(it.origin)}${it.count > 1 ? ' · ×' + it.count : ''}</div>
           ${(it.detail || (it.details && it.details[0])) ? `<div class="test-checks" style="list-style:none; margin-left:0;">${this.escape(it.detail || it.details[0])}</div>` : ''}
         </div>`).join('') : `<div class="empty" style="padding:20px;">Nessun problema aperto</div>`}
       <div class="btn-row" style="margin:12px 0 8px;">
-        <button class="btn btn-secondary" onclick="app.reportProblem()">🐞 Segnala un problema</button>
-        <button class="btn btn-secondary" onclick="app.previewTestReport()">📄 Anteprima report</button>
+        <button class="btn btn-secondary" onclick="app.reportProblem()">Segnala un problema</button>
+        <button class="btn btn-secondary" onclick="app.previewTestReport()">Anteprima report</button>
       </div>
-      <button class="btn btn-send" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmCloseTestSession()">${t.busy === 'Genero il report…' ? t.busy : '✅ Chiudi la sessione e genera il report'}</button>
+      <button class="btn btn-send" style="width:100%;" ${busy ? 'disabled' : ''} onclick="app.confirmCloseTestSession()">${t.busy === 'Genero il report…' ? t.busy : 'Chiudi la sessione e genera il report'}</button>
       <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 0;">Il report elenca solo cosa non va, con il contesto per correggerlo: condividilo come file o copialo e incollalo nella chat con Claude.</div>
 
-      <button class="btn btn-reject" style="width:100%; margin-top:16px;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">🗑️ Reset totale</button>
+      <button class="btn btn-reject" style="width:100%; margin-top:16px;" ${busy ? 'disabled' : ''} onclick="app.confirmTestCleanup()">Reset totale</button>
       <div style="font-size:12px; color:var(--text-secondary); margin:8px 4px 16px;">Da fare prima di usare l'app sul serio: toglie ogni traccia di test (email, prenotazioni, collaudo) così statistiche e promemoria partono puliti.</div>
 
       <details class="test-details" style="margin-top:8px;">
-        <summary style="font-size:14px; font-weight:600; padding:10px 4px; cursor:pointer;">🔧 Strumenti manuali e avanzati</summary>
+        <summary style="font-size:14px; font-weight:600; padding:10px 4px; cursor:pointer;">Strumenti manuali e avanzati</summary>
         <div style="margin-top:12px;">
 
-          <button class="btn btn-primary" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.runAutoChecks()">${t.busy && t.busy.startsWith('Controlli') ? t.busy : '🤖 Esegui i controlli automatici'}</button>
+          <button class="btn btn-primary" style="width:100%; margin-bottom:12px;" ${busy ? 'disabled' : ''} onclick="app.runAutoChecks()">${t.busy && t.busy.startsWith('Controlli') ? t.busy : 'Esegui i controlli automatici'}</button>
           ${autos.length ? `
             <div style="font-size:12px; color:var(--text-secondary); margin:0 4px 8px;">Ultima esecuzione: ${new Date(s.autoRunAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })} · ${autoPass.length}/${autos.length} superati</div>
-            ${autoFails.map(a => `<div class="booking-row" style="padding-right:16px;"><div class="name">${a.severity === 'errore' ? '❌' : '⚠️'} ${this.escape(a.title)}</div><div class="rate-info">${this.escape(a.group)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div></div>`).join('')}
+            ${autoFails.map(a => `<div class="booking-row" style="padding-right:16px;"><div class="name"><span class="${a.severity === 'errore' ? 'c-red' : 'c-amber'}">${ICON('alert')}</span> ${this.escape(a.title)}</div><div class="rate-info">${this.escape(a.group)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div></div>`).join('')}
             <details class="test-details"><summary>${autoPass.length} controlli superati</summary>
-              ${autoPass.map(a => `<div class="test-auto ok">✓ ${this.escape(a.title)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div>`).join('')}
+              ${autoPass.map(a => `<div class="test-auto ok">${ICON('check')} ${this.escape(a.title)}${a.detail ? ' — ' + this.escape(a.detail) : ''}</div>`).join('')}
             </details>` : ''}
 
           <div class="section-title">1 · Email di prova (inserimento manuale)</div>
@@ -1682,16 +1783,19 @@ class ACME {
         <div class="dates">Check-out del <b>${this.formatQuoteDate(b.check_out)}</b>${b.code ? ' · ' + this.escape(b.code) : ''}</div>
         <div class="rate-info" style="margin-top:4px;">${nextInfo}</div>
         <div class="btn-row" style="margin-top:10px;">
-          <button class="btn btn-send" onclick="app.confirmCleaner(${b.id})">✓ Confermato con lei</button>
+          <button class="btn btn-send" onclick="app.confirmCleaner(${b.id})">Confermato con lei</button>
         </div>
       </div>`;
     }).join('');
 
     const paymentRows = paymentPending.map(b => {
-      const diffDays = Math.round((new Date(b.check_in + 'T00:00:00') - new Date()) / 86400000);
+      // Giorni di calendario, non ore/24: alle 20 della sera prima risultava
+      // "check-in oggi stesso" invece di "tra 1 giorno".
+      const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((new Date(b.check_in + 'T00:00:00') - today0) / 86400000);
       const urgency = diffDays < 0
-        ? `⚠️ check-in già passato da ${Math.abs(diffDays)} giorn${Math.abs(diffDays) === 1 ? 'o' : 'i'}`
-        : diffDays === 0 ? '⚠️ check-in oggi stesso'
+        ? `Check-in già passato da ${Math.abs(diffDays)} giorn${Math.abs(diffDays) === 1 ? 'o' : 'i'}`
+        : diffDays === 0 ? 'Check-in oggi stesso'
         : `check-in tra ${diffDays} giorn${diffDays === 1 ? 'o' : 'i'}`;
       return `
       <div class="booking-row" ${b.code ? `onclick="app.openReminderBooking('${b.code}')"` : ''}>
@@ -1790,7 +1894,7 @@ class ACME {
   copyBookingCode(btn, code) {
     const original = btn.textContent;
     navigator.clipboard.writeText(code).then(() => {
-      btn.textContent = '✓ Copiato';
+      btn.textContent = 'Copiato';
       setTimeout(() => { btn.textContent = original; }, 1500);
     }).catch(() => {});
   }
@@ -1843,15 +1947,22 @@ class ACME {
       desc: `${this.escape(booking.guest_name)} tornerà tra le prenotazioni attive.`,
       confirmLabel: 'Riporta in corso',
       confirmColor: 'var(--accent)',
-      icon: '↩️',
+      icon: 'undo',
       onConfirm: async () => {
         try {
-          await fetch('/api/booking', {
+          const res = await fetch('/api/booking', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id, status: 'confermata', checkoutReviewed: false, concludedAt: null })
           });
-        } catch (e) {}
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Ripristino non riuscito');
+        } catch (e) {
+          // Prima l'errore veniva ignorato: l'app mostrava la prenotazione
+          // "in corso" anche se sul server era rimasta conclusa.
+          this.error = e.message || 'Ripristino non riuscito';
+          this.render();
+          return;
+        }
         const idx = this.bookings.findIndex(x => x.id === id);
         if (idx !== -1) { this.bookings[idx].status = 'confermata'; this.bookings[idx].checkout_reviewed = false; this.bookings[idx].concluded_at = null; }
         const area = document.getElementById('bookingResultsArea');
@@ -1871,6 +1982,7 @@ class ACME {
 
   async init() {
     const params = new URLSearchParams(window.location.search);
+    // Vecchi link di login con ?debug_scope=…: si ripulisce solo l'indirizzo
     const debugScope = params.get('debug_scope');
     if (debugScope) {
       window.history.replaceState({}, '', window.location.pathname);
@@ -1878,10 +1990,6 @@ class ACME {
     const key = localStorage.getItem('claude_api_key');
     if (!key) { this.view = 'setup'; this.render(); return; }
     await this.loadEmails();
-    if (debugScope) {
-      this.error = 'DEBUG scope ricevuto da Google: ' + decodeURIComponent(debugScope);
-      this.render();
-    }
     setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
   }
 
@@ -1994,7 +2102,8 @@ class ACME {
     const respItem = email.responses[idx];
     const resp = (respItem && typeof respItem === 'object') ? respItem.text : respItem;
     const to = (email.from.match(/[\w.+-]+@[\w.-]+\.\w+/) || [])[0] || '';
-    let subject = 'RE: ' + email.subject;
+    // "Re:" una volta sola, anche se l'oggetto ce l'ha già (prima: "RE: Re: …")
+    let subject = /^\s*re\s*:/i.test(email.subject || '') ? email.subject : 'Re: ' + (email.subject || '');
     let deliverTo;
     try {
       deliverTo = this.redirectIfTest(to);
@@ -2011,7 +2120,10 @@ class ACME {
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: deliverTo, subject, body: resp })
+        // Le risposte di test (deviate alla tua casella) non entrano nel thread dell'ospite finto
+        body: JSON.stringify(deliverTo === to
+          ? { to: deliverTo, subject, body: resp, threadId: email.threadId || null, inReplyTo: email.messageId || null }
+          : { to: deliverTo, subject, body: resp })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -2038,14 +2150,14 @@ class ACME {
 
   showSendConfirmation(confirmed) {
     const overlay = document.getElementById('confirmOverlay');
-    const icon = confirmed ? '✅' : '⚠️';
+    const icon = confirmed ? DLG('check', 'green') : DLG('alert', 'amber');
     const title = confirmed ? 'Email inviata e confermata' : 'Email inviata';
     const desc = confirmed
       ? 'Verificato direttamente su Gmail: il messaggio risulta davvero nella posta inviata.'
       : 'Il messaggio è stato inviato, ma la verifica automatica su Gmail non è riuscita in questo momento. Puoi controllare manualmente se vuoi esserne certo.';
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">${icon}</div>
+        ${icon}
         <h3>${title}</h3>
         <p>${desc}</p>
         <button class="btn btn-primary" onclick="app.closeConfirmModal()">OK</button>
@@ -2059,12 +2171,12 @@ class ACME {
 
   // Dialog di conferma generico usato prima di ogni cancellazione (✕): mostra
   // Annulla + un bottone d'azione rosso, ed esegue onConfirm solo se confermato.
-  showConfirmDialog({ title, desc, confirmLabel = 'Elimina', confirmColor = 'var(--red)', icon = '🗑️', onConfirm }) {
+  showConfirmDialog({ title, desc, confirmLabel = 'Elimina', confirmColor = 'var(--red)', icon = 'trash', onConfirm }) {
     this._pendingConfirmAction = onConfirm;
     const overlay = document.getElementById('confirmOverlay');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">${icon}</div>
+        ${DLG(icon, confirmColor === 'var(--red)' ? 'red' : 'neutral')}
         <h3>${title}</h3>
         <p>${desc}</p>
         <div class="btn-row">
@@ -2170,7 +2282,7 @@ class ACME {
     const items = guestHistory.map(h =>
       `<div>${this.formatQuoteDate(h.check_out)}: ${this.escape(h.notes)}</div>`
     ).join('');
-    return `<div class="discrepancy-banner">⚠️ <b>Questo ospite ha già soggiornato — note dai check-out precedenti:</b>${items}</div>`;
+    return `<div class="discrepancy-banner"><b>Questo ospite ha già soggiornato — note dai check-out precedenti:</b>${items}</div>`;
   }
 
   // ---------- Pop-up di revisione check-out: appare da solo quando una
@@ -2200,12 +2312,12 @@ class ACME {
     const checkOutFmt = this.formatQuoteDate(b.check_out);
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">🏁</div>
+        ${DLG('flag')}
         <h3>Com'è andato il soggiorno?</h3>
         <p>${this.escape(b.guest_name)} — check-out del ${checkOutFmt}${b.code ? ' · ' + this.escape(b.code) : ''}</p>
         <div class="btn-row">
-          <button class="btn btn-send" onclick="app.reviewCheckoutOk()">✅ Tutto ok</button>
-          <button class="btn" style="background:var(--orange); color:white;" onclick="app.reviewCheckoutProblem()">⚠️ Problemi</button>
+          <button class="btn btn-send" onclick="app.reviewCheckoutOk()">Tutto ok</button>
+          <button class="btn btn-warn" onclick="app.reviewCheckoutProblem()">Problemi</button>
         </div>
         <div class="btn-row">
           <button class="btn btn-secondary" onclick="app.skipCheckoutReview()">Chiedimelo più tardi</button>
@@ -2225,7 +2337,7 @@ class ACME {
     const overlay = document.getElementById('confirmOverlay');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">⚠️</div>
+        ${DLG('alert', 'amber')}
         <h3>Cosa è successo?</h3>
         <p>Questa nota resta legata a ${this.escape(b.guest_name)} — utile se dovesse riprenotare in futuro.</p>
         <textarea class="form-input" style="min-height:90px; resize:vertical; text-align:left;" placeholder="Es. rumoroso, lamentele dai vicini, danni…" oninput="app.checkoutNoteDraft = this.value"></textarea>
@@ -2381,7 +2493,7 @@ class ACME {
     const overlay = document.getElementById('confirmOverlay');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">📅</div>
+        ${DLG('calendar', 'blue')}
         <h3>Prossima prenotazione</h3>
         <p>${this.escape(desc)}</p>
         <button class="btn btn-primary" onclick="app.dismissNextBookingInfo()">OK</button>
@@ -2438,7 +2550,7 @@ class ACME {
 
 in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${nights} nott${nights === 1 ? 'e' : 'i'}).
 
-Totale soggiorno: € ${total.toFixed(2)}${discount > 0 ? ` (sconto ${discount}% per soggiorni lunghi già applicato)` : ''}
+Totale soggiorno: ${EUR(total)}${discount > 0 ? ` (sconto ${discount}% per soggiorni lunghi già applicato)` : ''}
 
 Resto a disposizione per qualsiasi chiarimento.
 
@@ -2487,9 +2599,9 @@ Domus 106`;
       const total = subtotal - discountAmount;
       previewEl.innerHTML = `
         <div class="detail-row"><span class="label">Notti</span>${nights}</div>
-        <div class="detail-row"><span class="label">Subtotale</span>€ ${subtotal.toFixed(2)}</div>
-        ${discount > 0 ? `<div class="detail-row"><span class="label">Sconto (${discount}%)</span>− € ${discountAmount.toFixed(2)}</div>` : ''}
-        <div class="detail-row" style="font-weight:700; font-size:16px; margin-top:8px;"><span class="label">Totale</span>€ ${total.toFixed(2)}</div>`;
+        <div class="detail-row"><span class="label">Subtotale</span>${EUR(subtotal)}</div>
+        ${discount > 0 ? `<div class="detail-row"><span class="label">Sconto (${discount}%)</span>− ${EUR(discountAmount)}</div>` : ''}
+        <div class="detail-row" style="font-weight:700; font-size:16px; margin-top:8px;"><span class="label">Totale</span>${EUR(total)}</div>`;
     } catch (err) {
       previewEl.innerHTML = `<div class="detail-row" style="color:var(--red)">${this.escape(err.message)}</div>`;
     }
@@ -2615,7 +2727,7 @@ Domus 106`;
     descParts.push('Pagamento: ' + paymentLabel);
     if (guests) descParts.push('Ospiti: ' + guests);
     if (guestEmail) descParts.push('Email ospite: ' + guestEmail);
-    if (total) descParts.push('Totale: € ' + Number(total).toFixed(2));
+    if (total) descParts.push('Totale: ' + EUR(total));
     if (code) descParts.push('Codice: ' + code);
     if (notes) descParts.push('Note: ' + notes);
     descParts.push('Creato da ACME Inbox Manager');
@@ -2755,14 +2867,14 @@ Domus 106`;
 
   showBookingSavedConfirmation(success, code, errorMsg) {
     const overlay = document.getElementById('confirmOverlay');
-    const icon = success ? '✅' : '⚠️';
+    const icon = success ? DLG('check', 'green') : DLG('alert', 'amber');
     const title = success ? 'Prenotazione salvata' : 'Salvataggio non riuscito';
     const desc = success
       ? (code ? `Codice prenotazione: <b>${code}</b>. La trovi anche in "Prenotazioni confermate".` : 'Salvata nell\'archivio interno.')
       : (this.escape(errorMsg || '') || 'Controlla la connessione e riprova.');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">${icon}</div>
+        ${icon}
         <h3>${title}</h3>
         <p>${desc}</p>
         <button class="btn btn-primary" onclick="app.closeConfirmModal()">OK</button>
@@ -2834,15 +2946,15 @@ Domus 106`;
 
   showQuoteConfirmation(confirmed, total) {
     const overlay = document.getElementById('confirmOverlay');
-    const icon = confirmed ? '✅' : '⚠️';
+    const icon = confirmed ? DLG('check', 'green') : DLG('alert', 'amber');
     const title = confirmed ? 'Preventivo inviato e confermato' : 'Preventivo inviato';
-    const totalText = typeof total === 'number' ? `Totale preventivato: € ${total.toFixed(2)}. ` : '';
+    const totalText = typeof total === 'number' ? `Totale preventivato: ${EUR(total)}. ` : '';
     const desc = confirmed
       ? totalText + 'Il PDF è stato consegnato e verificato direttamente su Gmail.'
       : totalText + 'Il PDF è stato inviato, ma la verifica automatica su Gmail non è riuscita in questo momento.';
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">${icon}</div>
+        ${icon}
         <h3>${title}</h3>
         <p>${desc}</p>
         <button class="btn btn-primary" onclick="app.closeConfirmModal()">OK</button>
@@ -2902,10 +3014,13 @@ Domus 106`;
       email.responses = data.responses;
       email.analysisError = false;
       this.activeResponseTab = 0;
+      // Se la nuova analisi cambia categoria, l'email va spostata nel gruppo
+      // giusto: prima restava in quello vecchio con l'etichetta nuova.
       Object.keys(this.byCategory).forEach(cat => {
-        const idx = (this.byCategory[cat] || []).findIndex(e => e.id === email.id);
-        if (idx !== -1) this.byCategory[cat][idx] = email;
+        this.byCategory[cat] = (this.byCategory[cat] || []).filter(e => e.id !== email.id);
       });
+      const target = CATEGORY_META[email.category] ? email.category : 'Da verificare';
+      (this.byCategory[target] = this.byCategory[target] || []).push(email);
     } catch (e) {
       this.error = e.message;
     }
@@ -2914,7 +3029,14 @@ Domus 106`;
   }
 
   rejectResponse(idx) {
-    this.selectedEmail.responses.splice(idx, 1);
+    const e = this.selectedEmail;
+    e.responses.splice(idx, 1);
+    // L'indice della risposta già inviata va spostato insieme alle altre,
+    // altrimenti il segno "inviata" finisce sulla risposta sbagliata.
+    if (typeof e.sentIdx === 'number') {
+      if (e.sentIdx === idx) e.sentIdx = null;
+      else if (e.sentIdx > idx) e.sentIdx -= 1;
+    }
     const maxIdx = Math.max(0, this.selectedEmail.responses.length - 1);
     if ((this.activeResponseTab || 0) > maxIdx) this.activeResponseTab = maxIdx;
     this.render();
@@ -2970,6 +3092,7 @@ Domus 106`;
   }
 
   goBack() {
+    this.error = null;
     if (this.view === 'detail') { this.view = 'emails'; this.selectedEmail = null; }
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
     else if (this.view === 'quoteStandalone') { this.view = 'dashboard'; }
@@ -3120,25 +3243,7 @@ Domus 106`;
       <div class="loading"><div class="spinner"></div>${msg}</div>`;
   }
 
-  // Icone a linea (24×24) per la dashboard, al posto delle emoji
-  icon(name) {
-    const d = {
-      bell: '<path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 004 0"/>',
-      bellOff: '<path d="M8.5 5.5A6 6 0 0118 11v3.5M6 11v5l-1.5 2H17"/><path d="M10 20.5a2 2 0 004 0"/><path d="M3 3l18 18"/>',
-      doc: '<path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7z"/><path d="M14 3v4h4"/><path d="M9 13h6M9 17h4"/>',
-      calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
-      archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9M10 13h4"/>',
-      chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-      key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
-      mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/>',
-      broom: '<path d="M14 4l6 6"/><path d="M17 7l-6 6"/><path d="M11 13c-3-1-6 1-7 7 6-1 8-4 7-7z"/>',
-      bug: '<rect x="7" y="8" width="10" height="12" rx="5"/><path d="M12 8v12M9 5l1.5 3M15 5l-1.5 3M3 13h4M17 13h4M4 19l3-2M20 19l-3-2"/>',
-      flask: '<path d="M9 3h6M10 3v6L4.5 19a1.3 1.3 0 001.1 2h12.8a1.3 1.3 0 001.1-2L14 9V3"/><path d="M7 15h10"/>',
-      refresh: '<path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/>',
-      chev: '<path d="M9 6l6 6-6 6"/>'
-    }[name] || '';
-    return `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
-  }
+  icon(name) { return ICON(name); }
 
   renderDashboard() {
     const entries = Object.entries(CATEGORY_META);
@@ -3194,7 +3299,7 @@ Domus 106`;
           ${this.icon('bell')}${reminderCount > 0 ? `<span class="reminder-count">${reminderCount}</span>` : ''}
         </button>
       </div>
-      ${this.error ? `<div class="error-banner">${this.error}</div>` : ''}
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
       <div class="rings">${rings}</div>
       <div class="metrics">${metrics}</div>
 
@@ -3228,14 +3333,14 @@ Domus 106`;
       const safeEmail = JSON.stringify(e).replace(/'/g, "&#39;");
       return `
         <div class="email-row" onclick='app.openEmail(${safeEmail})'>
-          <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissEmail(${safeEmail})'>✕</button>
+          <button class="dismiss-btn" onclick='event.stopPropagation(); app.dismissEmail(${safeEmail})'>${ICON('x')}</button>
           <div class="row-top">
             <div class="from">${this.escape(this.extractGuestName(e.from))}</div>
             <div class="email-date">${this.formatDate(e.date)}</div>
           </div>
           <div class="subject">${this.escape(e.subject)}</div>
           <div class="preview">${this.escape(e.body)}</div>
-          <div class="ready-badge">● Risposte pronte</div>${this.isTestAddr(e.from) ? ' <span class="chip chip-code" style="margin-left:6px;">🧪 test</span>' : ''}
+          <div class="ready-badge">${ICON('check')} Risposte pronte</div>${this.isTestAddr(e.from) ? ` <span class="chip chip-code" style="margin-left:6px;">${ICON('flask')} test</span>` : ''}
         </div>`;
     }).join('')
       : `<div class="empty">Nessuna email qui — persino Willy il Coyote ogni tanto si ferma a riprendere fiato</div>`;
@@ -3259,7 +3364,7 @@ Domus 106`;
           const isObj = r && typeof r === 'object';
           const label = isObj ? r.label : ('Opzione ' + (idx + 1));
           const color = isObj ? r.color : 'gray';
-          const sentMark = e.sentIdx === idx ? ' ✓' : '';
+          const sentMark = e.sentIdx === idx ? ' · inviata' : '';
           return `<button class="response-tab tab-${color} ${idx === activeIdx ? 'active' : ''}" onclick="app.selectResponseTab(${idx})"><span class="opt-dot ${color}"></span>${this.escape(label)}${sentMark}</button>`;
         }).join('')}
       </div>` : '';
@@ -3278,7 +3383,7 @@ Domus 106`;
           <div class="opt-label"><span class="opt-dot ${color}"></span>${label}</div>
           <textarea class="body-text" ${sent || sending ? 'disabled' : ''} oninput="app.updateResponseText(${idx}, this.value)">${this.escape(text)}</textarea>
           <div class="btn-row">
-            <button class="btn btn-send ${sent ? 'sent' : ''}" ${sending ? 'disabled' : ''} onclick="app.sendResponse(${idx})">${sending ? 'Invio…' : (sent ? '✓ Inviata' : 'Invia')}</button>
+            <button class="btn btn-send ${sent ? 'sent' : ''}" ${sending ? 'disabled' : ''} onclick="app.sendResponse(${idx})">${sending ? 'Invio…' : (sent ? 'Inviata' : 'Invia')}</button>
             <button class="btn btn-reject" ${sending ? 'disabled' : ''} onclick="app.rejectResponse(${idx})">Scarta</button>
           </div>
         </div>`;
@@ -3289,7 +3394,7 @@ Domus 106`;
         <div class="regenerate-box">
           <textarea class="body-text" placeholder="Es: ricordagli che il weekend del 20 è già tutto occupato, oppure che il deposito cauzionale è di 50€…" ${this.regenerating ? 'disabled' : ''} oninput="app.regenerateText = this.value">${this.escape(this.regenerateText || '')}</textarea>
           <div class="btn-row">
-            <button class="btn btn-primary" ${this.regenerating ? 'disabled' : ''} onclick="app.regenerateResponse()">${this.regenerating ? 'Genero…' : '✨ Rigenera con questo dettaglio'}</button>
+            <button class="btn btn-primary" ${this.regenerating ? 'disabled' : ''} onclick="app.regenerateResponse()">${this.regenerating ? 'Genero…' : 'Rigenera con questo dettaglio'}</button>
             <button class="btn btn-secondary" ${this.regenerating ? 'disabled' : ''} onclick="app.toggleRegenerateBox(false)">Annulla</button>
           </div>
         </div>` : `
@@ -3301,9 +3406,9 @@ Domus 106`;
     const bs = this.emailBookingState;
     const bookingSection = `
       <details class="booking-disclosure" ${bs.confirmed ? 'open' : ''}>
-        <summary>📋 Prenotazione ${bs.confirmed ? '<span class="chip chip-pay-saldata" style="margin-left:4px;">✓ salvata</span>' : ''}<span class="chevron">›</span></summary>
+        <summary><span class="settings-icon-badge">${ICON('clipboard')}</span>Prenotazione ${bs.confirmed ? '<span class="chip chip-pay-saldata" style="margin-left:4px;">salvata</span>' : ''}<span class="chevron">${ICON('chev')}</span></summary>
         <div class="disclosure-body">
-        ${bs.prefilledFromQuote ? `<div class="discrepancy-banner" style="background:rgba(10,100,112,0.1); color:var(--accent);">📄 <b>Dati precompilati</b> dal preventivo inviato il ${bs.quoteSentAt ? this.formatQuoteDate(bs.quoteSentAt.slice(0, 10)) : 'in precedenza'} — controlla prima di confermare.</div>` : ''}
+        ${bs.prefilledFromQuote ? `<div class="discrepancy-banner info-banner"><b>Dati precompilati</b> dal preventivo inviato il ${bs.quoteSentAt ? this.formatQuoteDate(bs.quoteSentAt.slice(0, 10)) : 'in precedenza'} — controlla prima di confermare.</div>` : ''}
         ${this.renderGuestHistoryBanner(bs.guestHistory)}
         <span class="form-label">Nome ospite</span>
         <input type="text" class="form-input" value="${this.escape(bs.guestName)}" oninput="app.updateQuoteField('emailBookingState','guestName', this.value)">
@@ -3334,9 +3439,9 @@ Domus 106`;
         <span class="form-label">Note</span>
         <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('emailBookingState','notes', this.value)">${this.escape(bs.notes)}</textarea>
         <div class="confirm-booking-box">
-          <div class="title">📅 Prenotazione confermata?</div>
+          <div class="title">Prenotazione confermata?</div>
           <div class="subtitle">Salva e aggiungi al Calendario del telefono</div>
-          <button class="btn ${bs.confirmed ? 'confirmed' : ''}" ${bs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('emailBookingState')">${bs.confirming ? 'Un attimo…' : (bs.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+          <button class="btn ${bs.confirmed ? 'confirmed' : ''}" ${bs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('emailBookingState')">${bs.confirming ? 'Un attimo…' : (bs.confirmed ? 'Salvata e aggiunta al Calendario' : 'Conferma e aggiungi al Calendario')}</button>
           ${bs.confirmed && bs.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${bs.confirmedCode}</b></div>` : ''}
         </div>
         </div>
@@ -3350,9 +3455,9 @@ Domus 106`;
       ${quoteHeader}
       <div class="detail-card">
         ${!quoteOpen ? `
-          <button class="btn btn-primary" onclick="app.toggleQuoteForm()">📄 Formula preventivo</button>
+          <button class="btn btn-primary" onclick="app.toggleQuoteForm()">${ICON('doc')} Formula preventivo</button>
         ` : this.quoteState.sent ? `
-          <div class="sent-confirm">✓ Preventivo inviato a ${this.escape(this.quoteState.guestName)}</div>
+          <div class="sent-confirm">${ICON('check')} Preventivo inviato a ${this.escape(this.quoteState.guestName)}</div>
         ` : `
           <span class="form-label">Nome ospite</span>
           <input type="text" class="form-input" value="${this.escape(this.quoteState.guestName)}" oninput="app.updateQuoteField('quoteState','guestName', this.value)">
@@ -3384,7 +3489,7 @@ Domus 106`;
           <div class="quote-preview" id="quotePreview"></div>
           <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
             <span class="form-label" style="margin-bottom:0;">Messaggio email di accompagnamento</span>
-            <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI('quoteState')">✨ ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
+            <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI('quoteState')">${ICON('sparkle')} ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
           </div>
           <textarea id="quoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('quoteState','emailMessage', this.value)">${this.escape(this.quoteState.emailMessage)}</textarea>
           <div class="btn-row">
@@ -3392,12 +3497,12 @@ Domus 106`;
             <button class="btn btn-reject" ${this.quoteState.sending ? 'disabled' : ''} onclick="app.toggleQuoteForm()">Annulla</button>
           </div>
           <div class="btn-row">
-            <button class="btn btn-secondary" ${this.quoteState.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('quoteState')">${this.quoteState.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
+            <button class="btn btn-secondary" ${this.quoteState.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('quoteState')">${this.quoteState.sharing ? 'Preparazione…' : 'Condividi PDF (WhatsApp e altro)'}</button>
           </div>
           <div class="confirm-booking-box">
-            <div class="title">📅 Prenotazione confermata?</div>
+            <div class="title">Prenotazione confermata?</div>
             <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
-            <button class="btn ${this.quoteState.confirmed ? 'confirmed' : ''}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Un attimo…' : (this.quoteState.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+            <button class="btn ${this.quoteState.confirmed ? 'confirmed' : ''}" ${this.quoteState.confirming ? 'disabled' : ''} onclick="app.confirmBooking('quoteState')">${this.quoteState.confirming ? 'Un attimo…' : (this.quoteState.confirmed ? 'Salvata e aggiunta al Calendario' : 'Conferma e aggiungi al Calendario')}</button>
             ${this.quoteState.confirmed && this.quoteState.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${this.quoteState.confirmedCode}</b></div>` : ''}
           </div>
         `}
@@ -3419,7 +3524,7 @@ Domus 106`;
         <div class="back" onclick="app.goBack()">‹ ${this.selectedCategory}</div>
       </div>
       ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
-      ${e.discrepancy ? `<div class="discrepancy-banner">⚠️ <b>Possibile incongruenza:</b> ${this.escape(e.discrepancy)}</div>` : ''}
+      ${e.discrepancy ? `<div class="discrepancy-banner"><b>Possibile incongruenza:</b> ${this.escape(e.discrepancy)}</div>` : ''}
       ${e.analysisError ? `<div class="error-banner">Analisi non riuscita per questa email.<br><button class="btn btn-primary" style="margin-top:10px;" onclick="app.reanalyzeEmail()">↻ Rianalizza</button></div>` : ''}
       <div class="detail-card">
         <div class="detail-row"><span class="label">Da</span>${this.escape(e.from)}</div>
@@ -3445,7 +3550,7 @@ Domus 106`;
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Genera preventivo</h1></div>
       <div class="detail-card">
         ${qs.sent ? `
-          <div class="sent-confirm">✓ Preventivo inviato a ${this.escape(qs.guestName)}</div>
+          <div class="sent-confirm">${ICON('check')} Preventivo inviato a ${this.escape(qs.guestName)}</div>
           <button class="btn btn-primary" style="margin-top:12px;" onclick="app.openStandaloneQuote()">Nuovo preventivo</button>
         ` : `
           <span class="form-label">Nome ospite</span>
@@ -3484,12 +3589,12 @@ Domus 106`;
             <button class="btn btn-send" ${qs.sending ? 'disabled' : ''} onclick="app.sendQuote('standaloneQuoteState')">${qs.sending ? 'Invio…' : 'Genera e invia via email'}</button>
           </div>
           <div class="btn-row">
-            <button class="btn btn-secondary" ${qs.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('standaloneQuoteState')">${qs.sharing ? 'Preparazione…' : '📲 Condividi PDF (WhatsApp e altro)'}</button>
+            <button class="btn btn-secondary" ${qs.sharing ? 'disabled' : ''} onclick="app.shareQuotePdf('standaloneQuoteState')">${qs.sharing ? 'Preparazione…' : 'Condividi PDF (WhatsApp e altro)'}</button>
           </div>
           <div class="confirm-booking-box">
-            <div class="title">📅 Prenotazione confermata?</div>
+            <div class="title">Prenotazione confermata?</div>
             <div class="subtitle">Salva la prenotazione e aggiungila al Calendario del telefono</div>
-            <button class="btn ${qs.confirmed ? 'confirmed' : ''}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Un attimo…' : (qs.confirmed ? '✓ Salvata e aggiunta al Calendario' : '✅ Conferma e aggiungi al Calendario')}</button>
+            <button class="btn ${qs.confirmed ? 'confirmed' : ''}" ${qs.confirming ? 'disabled' : ''} onclick="app.confirmBooking('standaloneQuoteState')">${qs.confirming ? 'Un attimo…' : (qs.confirmed ? 'Salvata e aggiunta al Calendario' : 'Conferma e aggiungi al Calendario')}</button>
             ${qs.confirmed && qs.confirmedCode ? `<div class="code-line">Codice prenotazione: <b>${qs.confirmedCode}</b></div>` : ''}
           </div>
         `}
@@ -3511,21 +3616,21 @@ Domus 106`;
       <div class="booking-row ${showQuickConclude ? 'has-quick-action' : ''}" onclick='app.openBookingDetail(${safeBooking})'>
         ${isHistory
           ? (locked
-              ? `<button class="dismiss-btn" title="Bloccata: consultabile ma non modificabile" disabled style="opacity:0.4; cursor:default;">🔒</button>`
-              : `<button class="dismiss-btn" title="Riporta tra le prenotazioni in corso" onclick='event.stopPropagation(); app.restoreBookingToActive(${b.id})'>↩</button>`)
+              ? `<button class="dismiss-btn" title="Bloccata: consultabile ma non modificabile" disabled style="opacity:0.4; cursor:default;">${ICON('lock')}</button>`
+              : `<button class="dismiss-btn" title="Riporta tra le prenotazioni in corso" onclick='event.stopPropagation(); app.restoreBookingToActive(${b.id})'>${ICON('undo')}</button>`)
           : ''}
-        ${showQuickConclude ? `<button class="flag-btn" title="Segna come conclusa" onclick='event.stopPropagation(); app.quickConcludeBooking(${b.id})'>✓</button>` : ''}
+        ${showQuickConclude ? `<button class="flag-btn" title="Segna come conclusa" onclick='event.stopPropagation(); app.quickConcludeBooking(${b.id})'>${ICON('check')}</button>` : ''}
         <div class="row-top">
           <div class="name">${this.escape(b.guest_name)}</div>
-          ${b.total ? `<div class="total">€ ${Number(b.total).toFixed(2)}</div>` : ''}
+          ${b.total ? `<div class="total">${EUR(b.total)}</div>` : ''}
         </div>
-        ${b.rate_per_night ? `<div class="rate-info">€ ${Number(b.rate_per_night).toFixed(2)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
+        ${b.rate_per_night ? `<div class="rate-info">${EUR(b.rate_per_night)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
         <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
         <div class="chip-row">
           <span class="chip ${statusClass}">${this.escape(status)}</span>
           <span class="chip ${paymentClass}">${paymentLabel}</span>
-          ${b.guests ? `<span class="chip chip-guests">👤 ${b.guests}</span>` : ''}
-          ${this.isTestAddr(b.guest_email) ? '<span class="chip chip-code">🧪 test</span>' : ''}
+          ${b.guests ? `<span class="chip chip-guests">${ICON('user')} ${b.guests}</span>` : ''}
+          ${this.isTestAddr(b.guest_email) ? `<span class="chip chip-code">${ICON('flask')} test</span>` : ''}
           <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
         </div>
       </div>`;
@@ -3578,13 +3683,13 @@ Domus 106`;
     const overlay = document.getElementById('confirmOverlay');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">🏁</div>
+        ${DLG('flag')}
         <h3>Sei sicuro di voler chiudere questa prenotazione?</h3>
         <p>${this.escape(booking.guest_name)} passerà nello storico.</p>
         <div class="review-tab">Il soggiorno è andato bene?</div>
         <div class="btn-row">
           <button class="btn btn-send" onclick="app.quickConcludeGood()">Sì</button>
-          <button class="btn" style="background:var(--orange); color:white;" onclick="app.quickConcludeBad()">No</button>
+          <button class="btn btn-warn" onclick="app.quickConcludeBad()">No</button>
         </div>
         <div class="btn-row">
           <button class="btn btn-secondary" onclick="app.cancelConfirmDialog()">Annulla</button>
@@ -3604,7 +3709,7 @@ Domus 106`;
     const overlay = document.getElementById('confirmOverlay');
     overlay.innerHTML = `
       <div class="confirm-box">
-        <div class="icon">⚠️</div>
+        ${DLG('alert', 'amber')}
         <h3>Cosa è successo?</h3>
         <p>Questa nota resta legata a ${this.escape(booking.guest_name)} — utile se dovesse riprenotare in futuro.</p>
         <textarea class="form-input" style="min-height:90px; resize:vertical; text-align:left;" placeholder="Es. rumoroso, lamentele dai vicini, danni…" oninput="app.checkoutNoteDraft = this.value"></textarea>
@@ -3700,8 +3805,8 @@ Domus 106`;
         <div class="detail-row"><span class="label">Check-in</span><b>${checkInFmt}</b></div>
         <div class="detail-row"><span class="label">Check-out</span><b>${checkOutFmt}</b></div>
         ${b.guests ? `<div class="detail-row"><span class="label">Ospiti</span>${b.guests}</div>` : ''}
-        ${b.total ? `<div class="detail-row"><span class="label">Totale</span>€ ${Number(b.total).toFixed(2)}</div>` : ''}
-        ${b.rate_per_night ? `<div class="detail-row"><span class="label">Tariffa</span>€ ${Number(b.rate_per_night).toFixed(2)}/notte</div>` : ''}
+        ${b.total ? `<div class="detail-row"><span class="label">Totale</span>${EUR(b.total)}</div>` : ''}
+        ${b.rate_per_night ? `<div class="detail-row"><span class="label">Tariffa</span>${EUR(b.rate_per_night)}/notte</div>` : ''}
         ${b.discount_percent ? `<div class="detail-row"><span class="label">Sconto</span>${b.discount_percent}%</div>` : ''}
       </div>
       ${hasSource ? `
@@ -3716,7 +3821,7 @@ Domus 106`;
       <div class="section-title">Stato, pagamento e note</div>
       <div class="detail-card">
         ${locked ? `
-          <div class="discrepancy-banner">🔒 Conclusa da più di 48 ore: ora è solo consultabile, non più modificabile né ripristinabile tra le prenotazioni in corso.</div>
+          <div class="discrepancy-banner">Conclusa da più di 48 ore: ora è solo consultabile, non più modificabile né ripristinabile tra le prenotazioni in corso.</div>
           <div class="detail-row"><span class="label">Stato soggiorno</span>${this.escape(b.status || 'confermata')}</div>
           <div class="detail-row"><span class="label">Stato pagamento</span>${this.escape(b.payment_status || 'da saldare')}</div>
           ${b.notes ? `<div class="detail-row"><span class="label">Note</span></div><div class="original-text">${this.escape(b.notes)}</div>` : ''}
@@ -3732,7 +3837,7 @@ Domus 106`;
       </div>
       ${this.bookingDetailOrigin === 'bookingHistory' ? `
       <div class="detail-card">
-        <button class="btn" style="background:rgba(255,59,48,0.1); color:var(--red);" onclick="app.dismissBooking(${b.id})">🗑️ Elimina prenotazione</button>
+        <button class="btn btn-reject" style="width:100%;" onclick="app.dismissBooking(${b.id})">Elimina prenotazione</button>
       </div>` : ''}`;
   }
 
@@ -3761,6 +3866,9 @@ Domus 106`;
     if (this.view === 'setup') el.innerHTML = this.renderSetup();
     else if (this.view === 'login') el.innerHTML = this.renderLogin();
     else if (this.view === 'loading' || this.view === 'init') el.innerHTML = this.renderLoading();
+    // Prima "analyzing" non aveva una schermata: durante la rianalisi restava
+    // quella vecchia, senza nessun segno che stesse succedendo qualcosa.
+    else if (this.view === 'analyzing') el.innerHTML = `<div class="loading" style="padding-top:120px;"><div class="spinner"></div>Rianalizzo l'email…</div>`;
     else if (this.view === 'dashboard') el.innerHTML = this.renderDashboard();
     else if (this.view === 'emails') el.innerHTML = this.renderEmails();
     else if (this.view === 'detail') el.innerHTML = this.renderDetail();
