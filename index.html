@@ -3819,6 +3819,50 @@ Domus 106`;
     this.render();
   }
 
+  // Consumo IA: spesa contata dall'app e credito residuo stimato
+  async openAiUsage(msg) {
+    let d = {};
+    try {
+      const res = await fetch('/api/booking?aiUsage=1');
+      d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Dati non disponibili');
+    } catch (e) { d = { error: e.message }; }
+    const usd = (n) => '$ ' + (Number(n) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const months = Object.entries((d.usage && d.usage.months) || {}).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 3);
+    const since = d.usage && d.usage.since ? this.formatQuoteDate(d.usage.since.slice(0, 10)) : null;
+    const overlay = document.getElementById('confirmOverlay');
+    overlay.innerHTML = `
+      <div class="confirm-box" style="text-align:left;">
+        <h3 style="text-align:center;">Consumo IA</h3>
+        ${d.error ? `<div class="error-banner">${this.escape(d.error)}</div>` : ''}
+        ${msg ? `<div class="sent-confirm" style="margin:0 0 12px;">${this.escape(msg)}</div>` : ''}
+        ${d.remaining != null ? `
+          <div style="text-align:center; margin:4px 0 14px;"><div class="stat-big" style="margin:0;">${usd(d.remaining)}</div><div class="stat-cap">credito stimato rimasto</div></div>` : ''}
+        ${months.map(([m, x]) => `<div class="detail-row" style="display:flex; justify-content:space-between;"><span class="label">${this.capitalize(new Date(m + '-01T12:00:00').toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }))}</span><span>${usd(x.usd)} · ${x.calls} richieste</span></div>`).join('') || '<p style="text-align:center;">Nessuna spesa registrata finora.</p>'}
+        <p style="font-size:12px; margin:10px 0 14px; text-align:left;">Conteggio fatto dall'app${since ? ` dal ${since}` : ''}, ai prezzi di listino di Claude Sonnet 5.5. Il saldo esatto è nella console Anthropic: la chiave API non può leggerlo.</p>
+        <span class="form-label">Credito che vedi ora nella console ($)</span>
+        <div class="copy-field" style="margin-bottom:12px;">
+          <input id="aiCredit" type="number" step="0.01" min="0" class="form-input" style="font-family:inherit; font-size:16px;" placeholder="es. 4,20" value="${d.credit && d.credit.amount != null ? '' : ''}">
+          <button class="btn btn-secondary" style="flex:none; padding:10px 14px;" onclick="app.saveAiCredit()">Salva</button>
+        </div>
+        <div class="btn-row">
+          <a class="btn btn-secondary" style="text-decoration:none;" href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Apri la console</a>
+          <button class="btn btn-primary" onclick="app.closeConfirmModal()">Chiudi</button>
+        </div>
+      </div>`;
+    overlay.classList.remove('hidden');
+  }
+
+  async saveAiCredit() {
+    const v = (document.getElementById('aiCredit') || {}).value;
+    try {
+      const res = await fetch('/api/booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ saveAiCredit: { amount: v } }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'Salvataggio non riuscito');
+      this.openAiUsage('Credito salvato: da ora la spesa viene scalata da qui.');
+    } catch (e) { this.openAiUsage(e.message); }
+  }
+
   useServerKey() {
     localStorage.removeItem('claude_api_key');
     this.loadEmails();
@@ -3968,6 +4012,7 @@ Domus 106`;
       <details class="advanced">
         <summary>Avanzate <span class="chevron">${ICON('chev')}</span></summary>
         <div class="settings-card" style="margin-top:8px;">
+          ${row('app.openAiUsage()', 'chart', 'Consumo IA e credito')}
           ${row('app.resetKey()', 'key', 'Chiave API di Claude')}
           ${row('app.openTestLab()', 'flask', 'Laboratorio di test')}
         </div>

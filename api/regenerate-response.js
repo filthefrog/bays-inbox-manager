@@ -1,5 +1,6 @@
 import { claudeKey, requireAuth, romeDate } from '../lib/auth.js';
 import { generateVariant } from '../lib/analyze-email.js';
+import { callClaude, flushUsage } from '../lib/claude.js';
 import { getOccupied, occupiedText } from '../lib/availability.js';
 
 // Rigenera UNA risposta a partire da un'istruzione extra data dall'host,
@@ -49,8 +50,10 @@ export default async function handler(req, res) {
           body: JSON.stringify({ responses: [...list, response] })
         }).catch(() => {});
       }
+      await flushUsage();
       return res.status(200).json({ response });
     } catch (err) {
+      await flushUsage();
       return res.status(502).json({ error: err.message || 'Generazione non riuscita' });
     }
   }
@@ -64,6 +67,8 @@ export default async function handler(req, res) {
   }
 
   const systemPrompt = `Scrivi la risposta via email di Domus 106 (affittacamere) a un ospite, in italiano.
+
+Dai SEMPRE del Lei all'ospite, mai del tu, anche se il cliente scrive dando del tu.
 
 Tono — questa è la linea guida per OGNI risposta che generi, sempre: cordiale e calda, come scriverebbe una persona che gestisce con cura il proprio affittacamere, MAI artificiale, rigida o da modulo precompilato. Evita frasi fatte da email aziendale generica ("Si prega di", "Restiamo in attesa di un suo cortese riscontro"). Scrivi come scriverebbe davvero l'host: diretto, gentile, naturale.
 
@@ -85,34 +90,8 @@ ${extraInstruction.trim()}
 """`;
 
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 700,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }]
-      })
-    });
-
-    if (!r.ok) {
-      const detail = await r.text();
-      return res.status(r.status === 401 ? 401 : 502).json({
-        error: 'Generazione fallita: ' + detail.slice(0, 200)
-      });
-    }
-
-    const data = await r.json();
-    const text = (data.content || [])
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('\n')
-      .trim();
+    const text = await callClaude(apiKey, `${systemPrompt}\n\n${userPrompt}`, 1500);
+    await flushUsage();
 
     if (!text) {
       return res.status(502).json({ error: 'Risposta vuota dal modello' });
@@ -121,6 +100,7 @@ ${extraInstruction.trim()}
     return res.status(200).json({ text });
 
   } catch (error) {
+    await flushUsage();
     console.error('regenerate-response error:', error);
     return res.status(500).json({ error: error.message || 'Errore sconosciuto' });
   }

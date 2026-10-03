@@ -151,6 +151,27 @@ export default async function handler(req, res) {
     }
   }
 
+  // Spesa IA contata dall'app (lib/claude.js) e credito impostato a mano:
+  // la chiave API normale non può leggere il saldo dalla console Anthropic.
+  if (req.method === 'GET' && req.query.aiUsage === '1') {
+    const [usage, credit] = await Promise.all([readJson('ai_usage'), readJson('ai_credit')]);
+    const total = Object.values(usage.months || {}).reduce((t, m) => t + (m.usd || 0), 0);
+    const remaining = credit.amount != null ? Math.max(0, credit.amount - (total - (credit.usdAtSave || 0))) : null;
+    return res.status(200).json({ usage, credit, total, remaining });
+  }
+  if (req.method === 'POST' && req.body && req.body.saveAiCredit) {
+    const amount = Number(String(req.body.saveAiCredit.amount).replace(',', '.'));
+    if (!(amount >= 0 && amount < 100000)) return res.status(400).json({ error: 'Importo non valido' });
+    try {
+      const usage = await readJson('ai_usage');
+      const total = Object.values(usage.months || {}).reduce((t, m) => t + (m.usd || 0), 0);
+      await stateSet('ai_credit', JSON.stringify({ amount, at: new Date().toISOString(), usdAtSave: total }));
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   // Il database ha già le colonne nuove (camere, incassato)?
   if (req.method === 'GET' && req.query.schemaCheck === '1') {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?select=rooms,amount_paid&limit=1`, {

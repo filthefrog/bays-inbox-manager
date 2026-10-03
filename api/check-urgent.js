@@ -3,6 +3,7 @@ import { sendPushToAll } from '../lib/send-push.js';
 import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
 import { getOccupied, occupiedText } from '../lib/availability.js';
 import { romeDate } from '../lib/auth.js';
+import { flushUsage } from '../lib/claude.js';
 
 const MAX_NEW_PER_RUN = 8;
 
@@ -138,7 +139,7 @@ export default async function handler(req, res) {
     }
 
     const listResponse = await fetch(
-      "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me") + "&maxResults=25",
+      "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me -category:promotions -category:social") + "&maxResults=25",
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -177,7 +178,7 @@ export default async function handler(req, res) {
     // ciò che tiene il costo vicino allo zero — la maggior parte dei controlli
     // ogni 5 minuti non troverà nulla di nuovo e non chiamerà Claude.
     const ids = emails.map(e => e.id).join(',');
-    const cacheResp = await fetch(`${SUPABASE_URL}/rest/v1/analyzed_emails?id=in.(${ids})&select=id`, {
+    const cacheResp = await fetch(`${SUPABASE_URL}/rest/v1/analyzed_emails?id=in.(${ids})&select=id,resolved`, {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
     });
     const cachedRows = cacheResp.ok ? await cacheResp.json() : [];
@@ -191,6 +192,7 @@ export default async function handler(req, res) {
 
     const context = await occupiedContext();
     const results = await Promise.allSettled(toAnalyze.map(email => analyzeAndRespond(email, CLAUDE_KEY, context)));
+    await flushUsage();
 
     const toSave = [];
     const urgent = [];
@@ -217,17 +219,28 @@ export default async function handler(req, res) {
       }).catch(() => {});
     }
 
-    if (urgent.length > 0) {
+    // Notifica per ogni giro con email nuove (non solo le urgenti), con il
+    // numero da mostrare sull'icona dell'app: su iPhone un'app web non può
+    // aggiornarsi da sola a schermo spento, quindi è il server a lavorare
+    // ogni 5 minuti e ad avvisare; aprendo l'app le email sono già pronte.
+    let notified = null;
+    if (toSave.length > 0) {
+      const badge = cachedRows.filter(r => !r.resolved).length + toSave.length;
+      const saved = toAnalyze.filter((e, i) => results[i].status === 'fulfilled');
+      const who = (e) => `${e.from.replace(/<.*>/, '').replace(/"/g, '').trim() || e.from}: ${e.subject}`;
+      const first = urgent[0] || saved[0];
       await sendPushToAll({
-        title: urgent.length === 1 ? "Email urgente ricevuta" : `${urgent.length} email urgenti ricevute`,
-        body: urgent.length === 1
-          ? `Da ${urgent[0].from.replace(/<.*>/, '').trim() || urgent[0].from}: ${urgent[0].subject}`
-          : "Controlla la dashboard ACME appena puoi.",
-        url: "/"
+        title: urgent.length
+          ? (urgent.length === 1 ? 'Email urgente ricevuta' : `${urgent.length} email urgenti ricevute`)
+          : (saved.length === 1 ? 'Nuova email' : `${saved.length} nuove email`),
+        body: `Da ${who(first)}${saved.length > 1 ? ` e altre ${saved.length - 1}` : ''}`,
+        url: '/',
+        badge
       }).catch(() => {});
+      notified = { count: saved.length, urgent: urgent.length, badge };
     }
 
-    return res.status(200).json({ checked: emails.length, newlyAnalyzed: toAnalyze.length, urgent: urgent.length, checkoutReminder });
+    return res.status(200).json({ checked: emails.length, newlyAnalyzed: toAnalyze.length, urgent: urgent.length, notified, checkoutReminder });
 
   } catch (error) {
     console.error('Errore check-urgent:', error);

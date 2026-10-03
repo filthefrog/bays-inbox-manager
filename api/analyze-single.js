@@ -1,5 +1,6 @@
 import { analyzeAndRespond } from '../lib/analyze-email.js';
 import { claudeKey } from '../lib/auth.js';
+import { flushUsage } from '../lib/claude.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -16,8 +17,10 @@ export default async function handler(req, res) {
 
   try {
     const result = await analyzeAndRespond({ from, subject, body }, apiKey);
+    await flushUsage();
     return res.status(200).json(result);
   } catch (error) {
+    await flushUsage();
     return res.status(500).json({ error: error.message || 'Analisi fallita' });
   }
 }
