@@ -4,6 +4,7 @@ import { computeQuote } from '../lib/pricing.js';
 import { KNOWLEDGE_BASE } from '../lib/analyze-email.js';
 import { buildQuotePdf } from '../lib/quote-pdf.js';
 import { claudeKey } from '../lib/auth.js';
+import { callClaude, flushUsage } from '../lib/claude.js';
 
 // Un solo endpoint per tutto ciò che riguarda i preventivi (genera+invia,
 // genera solo PDF, genera solo il messaggio con l'IA) — accorpato per stare
@@ -91,6 +92,7 @@ ${quoteLines(q).map(l => '- ' + l).join('\n')}
 - Acconto per confermare (${q.depositPercent}%): ${eur(q.depositAmount)}${q.securityDeposit ? `\n- Cauzione: ${eur(q.securityDeposit)} con bonifico prima dell'arrivo, restituita dopo il check-out` : ''}
 
 ISTRUZIONI:
+- Dai SEMPRE del Lei all'ospite (Gentile …, Le invio, La ringrazio), mai del tu, anche se il cliente scrive dando del tu
 - Scrivi un'email di risposta che affronti DAVVERO quello che il cliente ha scritto: se ha fatto domande specifiche (su parcheggio, orari, servizi, ecc.) rispondi anche a quelle usando i dati reali sopra, non solo il preventivo
 - Menziona che il preventivo dettagliato è allegato in PDF
 - Includi nel testo le date del soggiorno e il totale
@@ -99,18 +101,11 @@ ISTRUZIONI:
 - Rispondi SOLO con il testo dell'email, niente introduzioni, niente markdown, niente virgolette attorno al testo`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 700, messages: [{ role: "user", content: prompt }] })
-      });
-      if (!response.ok) {
-        const errBody = await response.text();
-        throw new Error("Claude API error: " + errBody.slice(0, 200));
-      }
-      const data = await response.json();
-      return res.status(200).json({ message: data.content[0].text.trim() });
+      const message = await callClaude(apiKey, prompt, 1500);
+      await flushUsage();
+      return res.status(200).json({ message });
     } catch (error) {
+      await flushUsage();
       return res.status(500).json({ error: error.message });
     }
   }

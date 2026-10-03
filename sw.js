@@ -1,4 +1,4 @@
-const CACHE_NAME = 'acme-shell-v1';
+const CACHE_NAME = 'acme-shell-v2';
 const SHELL_FILES = ['/', '/index.html'];
 
 self.addEventListener('install', (event) => {
@@ -38,6 +38,10 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  // Numero sull'icona dell'app (iPhone con iOS 16.4+ e app aggiunta alla Home)
+  if (typeof data.badge === 'number' && self.navigator && 'setAppBadge' in self.navigator) {
+    (data.badge > 0 ? self.navigator.setAppBadge(data.badge) : self.navigator.clearAppBadge()).catch(() => {});
+  }
   event.waitUntil(
     self.registration.showNotification(data.title || 'ACME', {
       body: data.body || '',

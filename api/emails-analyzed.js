@@ -4,6 +4,7 @@ import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
 import { LABEL_NAME } from './test-lab.js';
 import { getOccupied, occupiedText } from '../lib/availability.js';
 import { romeDate, claudeKey } from '../lib/auth.js';
+import { flushUsage } from '../lib/claude.js';
 
 // Quante email nuove analizzare al massimo per richiesta: oltre, Vercel
 // rischia di interrompere la funzione (limite di tempo). Le altre vengono
@@ -69,7 +70,7 @@ export default async function handler(req, res) {
     //   gli stessi 8 posti: altrimenti basta un po' di traffico vero perché
     //   le mail di prova spariscano dalla Dashboard senza nessun errore.
     const [real, test] = await Promise.all([
-      listMessageIds(`is:inbox -from:me -label:${LABEL_NAME}`, 25),
+      listMessageIds(`is:inbox -from:me -category:promotions -category:social -label:${LABEL_NAME}`, 25),
       listMessageIds(`is:inbox label:${LABEL_NAME}`, 20)
     ]);
 
@@ -150,6 +151,7 @@ export default async function handler(req, res) {
     const newlyAnalyzed = await Promise.allSettled(
       toAnalyze.map(email => analyzeAndRespond(email, apiKey, context))
     );
+    await flushUsage();
 
     const newResults = {};
     toAnalyze.forEach((email, i) => {
