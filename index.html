@@ -270,6 +270,11 @@
     cursor: pointer; white-space: nowrap; transition: background 0.15s ease, color 0.15s ease;
   }
   .response-tab:active { opacity: 0.7; }
+  /* Con più di tre risposte (dopo "Rigenera") la riga scorre da sola invece
+     di allargare la pagina, che prima si spostava di lato */
+  .response-tabs { overflow-x: auto; scrollbar-width: none; }
+  .response-tabs::-webkit-scrollbar { display: none; }
+  .response-tab { flex: 1 0 auto; padding-left: 12px; padding-right: 12px; }
   .response-tab.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(11,12,14,0.1); }
 
   .regenerate-box { margin-top: 10px; padding: 14px; background: var(--card); border-radius: var(--radius-md); }
