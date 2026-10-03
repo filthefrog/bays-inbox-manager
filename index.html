@@ -332,6 +332,18 @@
   .response-tab.tab-red.active { background: rgba(255,59,48,0.12); color: var(--red); border-color: transparent; }
   .response-tab.tab-gray.active { background: rgba(142,142,147,0.12); color: var(--text-secondary); border-color: transparent; }
 
+  .link-btn {
+    background: none; border: none; width: 100%; text-align: left;
+    color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 10px 2px; margin-top: 2px;
+  }
+  .link-btn:active { opacity: 0.6; }
+  .regenerate-box {
+    margin-top: 10px; padding: 12px; background: rgba(10,100,112,0.05);
+    border: 1px solid rgba(10,100,112,0.12); border-radius: var(--radius-md);
+  }
+  .regenerate-box .body-text { min-height: 70px; }
+
   .booking-disclosure {
     background: var(--card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
     margin: 20px 0 16px; overflow: hidden;
@@ -363,7 +375,7 @@
     padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; line-height: 1.45;
   }
   .discrepancy-banner b { font-weight: 700; }
-  .response-card .body-text {
+  .body-text {
     width: 100%;
     font-family: inherit;
     font-size: 14px; line-height: 1.5; white-space: pre-wrap;
@@ -374,8 +386,8 @@
     min-height: 110px;
     color: var(--text);
   }
-  .response-card .body-text:focus { outline: none; border-color: var(--accent); background: var(--card); }
-  .response-card .body-text:disabled { opacity: 0.7; }
+  .body-text:focus { outline: none; border-color: var(--accent); background: var(--card); }
+  .body-text:disabled { opacity: 0.7; }
   .sent-confirm {
     background: rgba(52,199,89,0.12); color: var(--green);
     padding: 12px; border-radius: var(--radius-sm); font-size: 13px; margin-top: 10px;
@@ -2044,6 +2056,9 @@ class ACME {
     this.emailBookingState = this.emptyQuoteState();
     this.emailBookingState.guestName = this.extractGuestName(email.from);
     this.activeResponseTab = 0;
+    this.regenerateBoxOpen = false;
+    this.regenerateText = '';
+    this.regenerating = false;
     this.view = 'detail';
     this.render();
     const guestEmail = this.extractEmailAddress(email.from);
@@ -3013,6 +3028,50 @@ Domus 106`;
     this.render();
   }
 
+  toggleRegenerateBox(open) {
+    this.regenerateBoxOpen = open;
+    if (!open) this.regenerateText = '';
+    this.render();
+  }
+
+  async regenerateResponse() {
+    const e = this.selectedEmail;
+    const detail = (this.regenerateText || '').trim();
+    if (!detail) { this.error = 'Scrivi almeno un dettaglio da usare per la nuova risposta'; this.render(); return; }
+    this.regenerating = true;
+    this.render();
+    try {
+      const res = await fetch('/api/regenerate-response', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-claude-key': localStorage.getItem('claude_api_key')
+        },
+        body: JSON.stringify({
+          subject: e.subject,
+          body: e.body,
+          category: e.category,
+          guestName: this.extractGuestName(e.from),
+          extraInstruction: detail
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        this.error = data.error || 'Rigenerazione non riuscita';
+      } else {
+        if (!Array.isArray(e.responses)) e.responses = [];
+        e.responses.push({ label: 'Rigenerata', color: 'gray', text: data.text });
+        this.activeResponseTab = e.responses.length - 1;
+        this.regenerateBoxOpen = false;
+        this.regenerateText = '';
+      }
+    } catch (err) {
+      this.error = 'Errore di rete durante la rigenerazione';
+    }
+    this.regenerating = false;
+    this.render();
+  }
+
   goBack() {
     if (this.view === 'detail') { this.view = 'emails'; this.selectedEmail = null; }
     else if (this.view === 'emails') { this.view = 'dashboard'; this.selectedCategory = null; }
@@ -3337,6 +3396,18 @@ Domus 106`;
         </div>`;
     })() : '';
 
+    const regenerateBox = allResponses.length ? (
+      this.regenerateBoxOpen ? `
+        <div class="regenerate-box">
+          <textarea class="body-text" placeholder="Es: ricordagli che il weekend del 20 è già tutto occupato, oppure che il deposito cauzionale è di 50€…" ${this.regenerating ? 'disabled' : ''} oninput="app.regenerateText = this.value">${this.escape(this.regenerateText || '')}</textarea>
+          <div class="btn-row">
+            <button class="btn btn-primary" ${this.regenerating ? 'disabled' : ''} onclick="app.regenerateResponse()">${this.regenerating ? 'Genero…' : '✨ Rigenera con questo dettaglio'}</button>
+            <button class="btn btn-secondary" ${this.regenerating ? 'disabled' : ''} onclick="app.toggleRegenerateBox(false)">Annulla</button>
+          </div>
+        </div>` : `
+        <button class="link-btn" onclick="app.toggleRegenerateBox(true)">Nessuna di queste ti convince? Aggiungi un dettaglio e rigenero →</button>`
+    ) : '';
+
     const quoteOpen = this.quoteState.open;
 
     const bs = this.emailBookingState;
@@ -3452,7 +3523,8 @@ Domus 106`;
 
     const responsesSection = `
       <div class="section-title">Risposte suggerite</div>
-      ${responses}`;
+      ${responses}
+      ${regenerateBox}`;
 
     return `
       <div class="list-header">
