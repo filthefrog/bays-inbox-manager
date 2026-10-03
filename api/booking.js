@@ -5,10 +5,29 @@
 // DELETE -> rimuove una prenotazione (es. se poi viene cancellata)
 
 import { requireAuth, romeDate } from '../lib/auth.js';
+import { getOccupied, conflictsWith, getIcalSources, stateGet, stateSet, buildFeed } from '../lib/availability.js';
+import crypto from 'crypto';
 
 // Testo sicuro per un campo .ics (RFC 5545): niente a capo, virgole o punti e
 // virgola "nudi", altrimenti il Calendario scarta o tronca l'evento.
 const icsText = (s) => String(s).replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/[,;]/g, m => '\\' + m);
+
+// Colonne aggiunte dopo (vedi supabase/2026-10-camere-pagamenti.sql). Finché
+// non sono state create nel database, si salva senza: l'app funziona lo
+// stesso e la risposta lo segnala con schemaMissing.
+const NEW_COLUMNS = ['rooms', 'amount_paid'];
+async function writeWithFallback(url, init, row) {
+  let resp = await fetch(url, { ...init, body: JSON.stringify(row) });
+  if (resp.ok) return { resp, schemaMissing: false };
+  const detail = await resp.text();
+  const missing = detail.includes('PGRST204') && NEW_COLUMNS.some(c => detail.includes(`'${c}'`));
+  if (!missing) return { resp, detail, schemaMissing: false };
+  const slim = { ...row };
+  NEW_COLUMNS.forEach(c => delete slim[c]);
+  if (Object.keys(slim).length === 0) return { resp, detail, schemaMissing: true };
+  resp = await fetch(url, { ...init, body: JSON.stringify(slim) });
+  return { resp, detail: resp.ok ? null : await resp.text(), schemaMissing: true };
+}
 
 function generateBookingCode(checkInStr) {
   // Formato: D106-MMDD-XXXX — leggibile, comunicabile a voce, nessun contatore
@@ -67,8 +86,70 @@ export default async function handler(req, res) {
     return res.status(200).send(lines.join('\r\n'));
   }
 
+  // Feed iCal delle prenotazioni dirette per Booking e Airbnb. Pubblico perché
+  // i portali lo leggono da soli, ma protetto da un codice segreto nel link e
+  // senza nomi né dati degli ospiti (solo le date occupate).
+  if (req.method === 'GET' && req.query.feed) {
+    const token = await stateGet('ical_feed_token');
+    if (!token || req.query.feed !== token) return res.status(404).send('Calendario non trovato');
+    const from = romeDate(-60);
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=id,check_in,check_out&status=neq.cancellata&check_out=gte.${from}&order=check_in.asc`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    if (!resp.ok) return res.status(502).send('Archivio non raggiungibile');
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).send(buildFeed(await resp.json()));
+  }
+
   // Tutto il resto legge o modifica le prenotazioni: solo per chi ha fatto login.
   if (!(await requireAuth(req, res))) return;
+
+  // Disponibilità: soggiorni (ACME, Booking, Airbnb) che si sovrappongono alle date
+  if (req.method === 'GET' && req.query.availability === '1') {
+    const { checkIn, checkOut, excludeId } = req.query;
+    if (!checkIn || !checkOut || checkOut <= checkIn) return res.status(400).json({ error: 'Date non valide' });
+    const { ranges, errors } = await getOccupied({ from: checkIn, to: checkOut, excludeBookingId: excludeId });
+    return res.status(200).json({ conflicts: conflictsWith(ranges, checkIn, checkOut), errors });
+  }
+
+  // Il database ha già le colonne nuove (camere, incassato)?
+  if (req.method === 'GET' && req.query.schemaCheck === '1') {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?select=rooms,amount_paid&limit=1`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    });
+    const r2 = await fetch(`${SUPABASE_URL}/rest/v1/pending_quotes?select=rooms&limit=1`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    });
+    return res.status(200).json({ upToDate: r.ok && r2.ok });
+  }
+
+  // Impostazioni dei calendari: link iCal da importare e link da esportare
+  if (req.method === 'GET' && req.query.calendarSettings === '1') {
+    let token = await stateGet('ical_feed_token');
+    if (!token) { token = crypto.randomBytes(18).toString('base64url'); await stateSet('ical_feed_token', token); }
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const sources = await getIcalSources();
+    return res.status(200).json({
+      booking: sources.booking || '', airbnb: sources.airbnb || '',
+      feedUrl: `https://${host}/api/booking?feed=${token}`
+    });
+  }
+  if (req.method === 'POST' && req.body && req.body.saveCalendarSettings) {
+    const clean = (u) => {
+      const v = String(u || '').trim().replace(/^webcal:\/\//i, 'https://');
+      if (v && !/^https:\/\/[^\s]+$/i.test(v)) throw new Error('Il link deve iniziare con https://');
+      return v;
+    };
+    try {
+      await stateSet('ical_import', JSON.stringify({ booking: clean(req.body.booking), airbnb: clean(req.body.airbnb) }));
+      const { errors } = await getOccupied({ from: romeDate(), to: romeDate(400) });
+      return res.status(200).json({ success: true, errors });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
 
   // Preventivo "in sospeso" collegato a un'email ospite — salvato quando si
   // invia un preventivo, letto quando si riapre una mail successiva dello
@@ -88,8 +169,8 @@ export default async function handler(req, res) {
   }
 
   // Promemoria operativi: pulizie da confermare (mail mandata alla colf ma
-  // mai confermata da Filippo) e pagamenti da sollecitare (ancora "da
-  // saldare" con check-in vicino o già passato).
+  // mai confermata da Filippo) e pagamenti da sollecitare (non ancora saldati,
+  // compresi quelli con solo l'acconto, con check-in vicino o già passato).
   if (req.method === 'GET' && req.query.reminders === '1') {
     try {
       const soonStr = romeDate(2);
@@ -99,7 +180,7 @@ export default async function handler(req, res) {
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
       );
       const paymentResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=id,guest_name,check_in,code&payment_status=eq.da saldare&status=neq.cancellata&status=neq.conclusa&check_in=lte.${soonStr}&order=check_in.asc`,
+        `${SUPABASE_URL}/rest/v1/confirmed_bookings?select=*&payment_status=in.(${encodeURIComponent('"da saldare","acconto versato"')})&status=neq.cancellata&status=neq.conclusa&check_in=lte.${soonStr}&order=check_in.asc`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
       );
 
@@ -180,18 +261,18 @@ export default async function handler(req, res) {
   // riga sola per guest_email, sovrascritta ogni volta che si invia un nuovo
   // preventivo.
   if (req.method === 'POST' && req.body && req.body.savePendingQuote) {
-    const { guestEmail, guestName, checkIn, checkOut, ratePerNight, discountPercent, guests, total, sourceSubject } = req.body;
+    const { guestEmail, guestName, checkIn, checkOut, ratePerNight, discountPercent, guests, total, sourceSubject, rooms } = req.body;
     if (!guestEmail) return res.status(400).json({ error: 'guestEmail mancante' });
     try {
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/pending_quotes?on_conflict=guest_email`, {
+      const { resp, detail: pqDetail } = await writeWithFallback(`${SUPABASE_URL}/rest/v1/pending_quotes?on_conflict=guest_email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${SUPABASE_KEY}`,
           Prefer: 'resolution=merge-duplicates,return=representation'
-        },
-        body: JSON.stringify({
+        }
+      }, {
           guest_email: guestEmail,
           guest_name: guestName || null,
           check_in: checkIn || null,
@@ -201,12 +282,11 @@ export default async function handler(req, res) {
           guests: guests || null,
           total: total || null,
           source_subject: sourceSubject || null,
-          created_at: new Date().toISOString()
-        })
-      });
+          created_at: new Date().toISOString(),
+          rooms: rooms ? Number(rooms) : null
+        });
       if (!resp.ok) {
-        const detail = await resp.text();
-        return res.status(500).json({ error: 'Errore Supabase: ' + detail.slice(0, 200) });
+        return res.status(500).json({ error: 'Errore Supabase: ' + (pqDetail || await resp.text()).slice(0, 200) });
       }
       const created = await resp.json();
       return res.status(200).json({ success: true, pendingQuote: created[0] });
@@ -219,7 +299,7 @@ export default async function handler(req, res) {
     const {
       guestName, guestEmail, checkIn, checkOut, total,
       sourceFrom, sourceSubject, sourceBody, notes, guests, paymentStatus,
-      ratePerNight, discountPercent
+      ratePerNight, discountPercent, rooms, amountPaid
     } = req.body;
     if (!guestName || !checkIn || !checkOut) {
       return res.status(400).json({ error: 'Nome ospite, check-in e check-out sono obbligatori' });
@@ -231,15 +311,15 @@ export default async function handler(req, res) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const code = generateBookingCode(checkIn);
       try {
-        const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings`, {
+        const { resp, detail: firstDetail, schemaMissing } = await writeWithFallback(`${SUPABASE_URL}/rest/v1/confirmed_bookings`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             apikey: SUPABASE_KEY,
             Authorization: `Bearer ${SUPABASE_KEY}`,
             Prefer: 'return=representation'
-          },
-          body: JSON.stringify({
+          }
+        }, {
             code,
             guest_name: guestName,
             guest_email: guestEmail || null,
@@ -254,14 +334,15 @@ export default async function handler(req, res) {
             discount_percent: discountPercent || null,
             source_from: sourceFrom || null,
             source_subject: sourceSubject || null,
-            source_body: sourceBody || null
-          })
-        });
+            source_body: sourceBody || null,
+            rooms: rooms ? Number(rooms) : null,
+            amount_paid: amountPaid ? Number(amountPaid) : 0
+          });
         if (resp.ok) {
           const created = await resp.json();
-          return res.status(200).json({ success: true, booking: created[0] });
+          return res.status(200).json({ success: true, booking: created[0], schemaMissing });
         }
-        const detail = await resp.text();
+        const detail = firstDetail || await resp.text();
         // 23505 = violazione di unicità (codice già usato). Prima bastava che
         // l'errore contenesse la parola "code" — cioè qualsiasi errore Supabase,
         // che riporta sempre un campo "code" — e ogni guasto diventava un finto
@@ -279,7 +360,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { id, notes, status, checkoutReviewed, paymentStatus, concludedAt, cleanerNotified, cleanerConfirmed } = req.body || {};
+    const { id, notes, status, checkoutReviewed, paymentStatus, concludedAt, cleanerNotified, cleanerConfirmed, rooms, amountPaid } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id mancante' });
     const patch = {};
     if (notes !== undefined) patch.notes = notes;
@@ -289,24 +370,25 @@ export default async function handler(req, res) {
     if (concludedAt !== undefined) patch.concluded_at = concludedAt;
     if (cleanerNotified !== undefined) patch.cleaner_notified = cleanerNotified;
     if (cleanerConfirmed !== undefined) patch.cleaner_confirmed = cleanerConfirmed;
+    if (rooms !== undefined) patch.rooms = rooms ? Number(rooms) : null;
+    if (amountPaid !== undefined) patch.amount_paid = Number(amountPaid) || 0;
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
     try {
-      const resp = await fetch(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
+      const { resp, detail, schemaMissing } = await writeWithFallback(`${SUPABASE_URL}/rest/v1/confirmed_bookings?id=eq.${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${SUPABASE_KEY}`,
           Prefer: 'return=representation'
-        },
-        body: JSON.stringify(patch)
-      });
+        }
+      }, patch);
       if (!resp.ok) {
-        const detail = await resp.text();
-        return res.status(500).json({ error: 'Errore Supabase: ' + detail.slice(0, 200) });
+        if (schemaMissing) return res.status(409).json({ error: 'Per salvare camere e importi incassati va prima aggiornato il database (vedi istruzioni)', schemaMissing });
+        return res.status(500).json({ error: 'Errore Supabase: ' + (detail || await resp.text()).slice(0, 200) });
       }
       const updated = await resp.json();
-      return res.status(200).json({ success: true, booking: updated[0] });
+      return res.status(200).json({ success: true, booking: updated[0], schemaMissing });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
