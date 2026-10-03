@@ -377,6 +377,7 @@
   .quote-preview { background: var(--bg); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px; border: 1px solid var(--border); }
   .quote-preview .detail-row:last-child { margin-bottom: 0; }
   .quote-preview:empty { display: none; }
+  .quote-preview .detail-row { display: flex; justify-content: space-between; gap: 12px; }
   a[onclick] { white-space: nowrap; }
 
   .error-banner { background: rgba(240,40,60,0.08); color: var(--red); border-left: 3px solid var(--red); padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; }
@@ -440,6 +441,29 @@
   .stat-grid span, .stat-trio span { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); margin-top: 5px; }
   .stat-trio { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
   .stat-trio b { font-size: 36px; }
+  /* Preventivo: camere, cauzione, anteprima */
+  .field-hint { font-size: 11.5px; color: var(--text-secondary); margin: -4px 2px 14px; line-height: 1.4; }
+  .pay-btn.active-dark { background: var(--text); color: white; }
+  .pay-btn.disabled { opacity: 0.35; cursor: default; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--bg); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 12px; cursor: pointer; }
+  .switch-row b { display: block; font-size: 14px; font-weight: 600; }
+  .switch-row small { display: block; font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+  .switch { width: 44px; height: 26px; border-radius: 13px; background: rgba(11,12,14,0.15); position: relative; flex-shrink: 0; transition: background 0.2s ease; }
+  .switch i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.2s ease; }
+  .switch.on { background: var(--green); }
+  .switch.on i { transform: translateX(18px); }
+  .preview-total { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--border); margin: 10px 0 6px; padding-top: 10px; }
+  .preview-total span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  .preview-total b { font-family: var(--display); font-size: 28px; font-weight: 700; line-height: 1; }
+  .conflict-list { margin: 6px 0 0 16px; line-height: 1.5; }
+  .avail-ok { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #00915a; margin-bottom: 10px; }
+  .avail-ok svg.i { width: 14px; height: 14px; stroke-width: 2.4; }
+  .copy-field { display: flex; gap: 8px; align-items: center; }
+  .copy-field input { flex: 1; min-width: 0; font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace; margin-bottom: 0; }
+  .steps { margin: 8px 0 0 18px; font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
+  .money-row { display: flex; justify-content: space-between; align-items: baseline; margin: 4px 0 12px; }
+  .money-row b { font-family: var(--display); font-size: 26px; font-weight: 700; }
+  .chip-due { background: rgba(240,40,60,0.1); color: var(--red); }
 </style>
 </head>
 <body>
@@ -485,6 +509,10 @@ const ICONS = {
   euro: '<path d="M17 6.5A7 7 0 007.5 12 7 7 0 0017 17.5M4 10h9M4 14h9"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/>'
 };
+// Listino unico (lo stesso file usato dal server per PDF, email e IA)
+let PR = null;
+const PR_READY = import('/lib/pricing.js?v=2').then(m => { PR = m; }).catch(() => {});
+
 // Importi in formato italiano: € 1.785 (senza ",00" se interi), € 127,50
 function EUR(n) {
   const v = Number(n) || 0;
@@ -604,7 +632,9 @@ class ACME {
       open: false, checkIn: '', checkOut: '', guestName: '', recipientEmail: '',
       ratePerNight: '', discountPercent: '', rateTouched: false, discountTouched: false,
       emailMessage: '', messageTouched: false, generatingMessage: false, sharing: false,
-      notes: '', guests: 1, guestHistory: [], paymentStatus: 'da saldare',
+      notes: '', guests: 2, guestHistory: [], paymentStatus: 'da saldare',
+      rooms: null, roomsTouched: false, withSecurityDeposit: true,
+      conflicts: null, availabilityErrors: [], amountPaid: '',
       prefilledFromQuote: false, quoteSentAt: null,
       confirming: false, confirmed: false, confirmedCode: null,
       sending: false, sent: false
@@ -646,7 +676,8 @@ class ACME {
 
   // Camere disponibili — usate per calcolare la percentuale di occupazione.
   // Aggiorna questo numero se cambia il numero di camere di Domus 106.
-  get roomsCount() { return 2; }
+  // Si affitta l'appartamento intero: l'occupazione si misura su un'unica unità
+  get roomsCount() { return 1; }
 
   daysInMonth(monthKey) {
     const [y, m] = monthKey.split('-').map(Number);
@@ -662,22 +693,23 @@ class ACME {
   // hanno una nota associata (proxy di "soggiorno con qualche problema" —
   // non perfetto, perché le note possono anche essere state scritte in fase
   // di prenotazione per motivi non legati a un problema).
+  // Statistiche per mese. Ogni notte (e la sua quota di incasso) va nel mese
+  // in cui cade: un soggiorno 28 ottobre → 3 novembre conta 4 notti a ottobre
+  // e 2 a novembre. Prima finiva tutto nel mese del check-in.
   computeMonthlyStats() {
     const months = {};
+    const ensure = (k) => months[k] || (months[k] = { revenue: 0, nights: 0, totalStays: 0, problemStays: 0, twoRoomStays: 0, daysInMonth: this.daysInMonth(k) });
     this.bookings.forEach(b => {
-      if (!b.check_in) return;
-      const monthKey = b.check_in.slice(0, 7);
-      if (!months[monthKey]) {
-        months[monthKey] = { revenue: 0, nights: 0, totalStays: 0, problemStays: 0, daysInMonth: this.daysInMonth(monthKey) };
-      }
-      const m = months[monthKey];
-      if (b.status === 'cancellata') return;
-      m.revenue += Number(b.total) || 0;
-      m.totalStays += 1;
-      try {
-        m.nights += this.computeNightsPreview(b.check_in, b.check_out);
-      } catch (e) {}
-      if (b.status === 'conclusa' && b.notes) m.problemStays += 1;
+      if (!b.check_in || !b.check_out || b.status === 'cancellata') return;
+      let dates;
+      try { dates = PR ? PR.nightDates(b.check_in, b.check_out) : null; } catch (e) { return; }
+      if (!dates) return;
+      const perNight = (Number(b.total) || 0) / dates.length;
+      dates.forEach(d => { const m = ensure(d.slice(0, 7)); m.nights += 1; m.revenue += perNight; });
+      const start = ensure(b.check_in.slice(0, 7));
+      start.totalStays += 1;
+      if (this.bookingRooms(b) === 2) start.twoRoomStays += 1;
+      if (b.status === 'conclusa' && b.notes) start.problemStays += 1;
     });
     return months;
   }
@@ -700,9 +732,10 @@ class ACME {
           <div class="stat-grid">
             <div><b>${occupancy}%</b><span>Occupazione</span></div>
             <div><b>${m.nights}<small>/${capacity}</small></b><span>Notti</span></div>
+            <div><b>${m.nights ? EUR(m.revenue / m.nights).replace('€ ', '') : '—'}</b><span>€ a notte</span></div>
             <div><b>${m.totalStays}</b><span>Soggiorni</span></div>
-            ${m.problemStays > 0 ? `<div><b class="c-amber">${m.problemStays}</b><span>Con note</span></div>` : ''}
           </div>
+          ${m.twoRoomStays ? `<div class="field-hint" style="margin:12px 0 0;">${m.twoRoomStays} ${m.twoRoomStays === 1 ? 'soggiorno' : 'soggiorni'} con entrambe le camere</div>` : ''}
         </div>`;
     }).join('');
 
@@ -711,7 +744,7 @@ class ACME {
         <div class="back" onclick="app.goBack()">‹ ACME</div>
       </div>
       <div class="topbar"><div class="eyebrow">Domus 106</div><h1>Statistiche</h1></div>
-      <div style="font-size:12px; color:var(--text-secondary); margin:-8px 0 16px 4px; line-height:1.4;">Occupazione calcolata su ${this.roomsCount} camere · le notti a cavallo tra due mesi sono contate tutte nel mese del check-in · "Con note/problemi" = soggiorni conclusi con una nota associata</div>
+      <div style="font-size:12px; color:var(--text-secondary); margin:-8px 0 16px 4px; line-height:1.4;">Prenotazioni salvate in ACME. Occupazione sull'appartamento intero; le notti a cavallo di due mesi sono divise tra i mesi, con la loro quota di incasso. "€ a notte" = incasso medio per notte occupata.</div>
       ${this.bookingsLoading ? `<div class="loading"><div class="spinner"></div>Calcolo le statistiche…</div>`
         : (rows || `<div class="empty">Nessuna prenotazione ancora registrata</div>`)}`;
   }
@@ -1203,6 +1236,10 @@ class ACME {
       T('lg:nightsBad', 'Date invertite: segnala errore', threw, true);
       T('lg:rateHigh', 'Tariffa suggerita in alta stagione (luglio)', this.suggestRatePreview('2026-07-10'), 150);
       T('lg:rateLow', 'Tariffa suggerita in bassa stagione (novembre)', this.suggestRatePreview('2026-11-10'), 80);
+      if (PR) {
+        T('lg:mixed', 'Listino: 28 mag → 5 giu = 4 notti bassa + 4 alta, 15% sulle notti', PR.computeQuote({ checkIn: '2026-05-28', checkOut: '2026-06-05', guests: 2 }).total, 782);
+        T('lg:room2', 'Listino: 4 ospiti, 7 notti luglio = 1.096 € (seconda camera inclusa)', PR.computeQuote({ checkIn: '2026-07-12', checkOut: '2026-07-19', guests: 4 }).total, 1096);
+      }
       T('lg:plus', 'Indirizzo con «+» letto per intero', this.extractEmailAddress('Marco <mario+acmetest.marco@gmail.com>'), 'mario+acmetest.marco@gmail.com');
       T('lg:name', 'Nome ospite tra virgolette', this.extractGuestName('"Marco Bianchi" <m@x.it>'), 'Marco Bianchi');
 
@@ -1743,6 +1780,96 @@ class ACME {
       </details>`;
   }
 
+  // ---------- Calendari: Booking e Airbnb dentro ACME, ACME dentro i portali ----------
+  async openCalendarSettings() {
+    this.cal = { loading: true, saving: false, booking: '', airbnb: '', feedUrl: '', message: null, errors: [], schemaOk: null };
+    this.view = 'calendarSettings';
+    this.render();
+    try {
+      const [r1, r2] = await Promise.all([fetch('/api/booking?calendarSettings=1'), fetch('/api/booking?schemaCheck=1')]);
+      const d1 = await r1.json().catch(() => ({})), d2 = await r2.json().catch(() => ({}));
+      if (!r1.ok) throw new Error(d1.error || 'Impostazioni non disponibili');
+      Object.assign(this.cal, { booking: d1.booking, airbnb: d1.airbnb, feedUrl: d1.feedUrl, schemaOk: r2.ok ? !!d2.upToDate : null });
+    } catch (e) { this.error = e.message; }
+    this.cal.loading = false;
+    if (this.view === 'calendarSettings') this.render();
+  }
+
+  async saveCalendarSettings() {
+    const c = this.cal;
+    c.booking = (document.getElementById('icalBooking') || {}).value || '';
+    c.airbnb = (document.getElementById('icalAirbnb') || {}).value || '';
+    c.saving = true; c.message = null; c.errors = []; this.error = null;
+    this.render();
+    try {
+      const res = await fetch('/api/booking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ saveCalendarSettings: true, booking: c.booking, airbnb: c.airbnb })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Salvataggio non riuscito');
+      c.errors = data.errors || [];
+      c.message = c.errors.length ? null : 'Salvati: i calendari rispondono correttamente.';
+    } catch (e) { this.error = e.message; }
+    c.saving = false;
+    this.render();
+  }
+
+  copyText(btn, text) {
+    const original = btn.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copiato';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }).catch(() => {});
+  }
+
+  renderCalendarSettings() {
+    const c = this.cal || {};
+    const SQL = `alter table confirmed_bookings add column if not exists rooms smallint; alter table confirmed_bookings add column if not exists amount_paid numeric default 0; alter table pending_quotes add column if not exists rooms smallint; update confirmed_bookings set rooms = case when coalesce(guests, 2) >= 3 then 2 else 1 end where rooms is null; update confirmed_bookings set amount_paid = total where payment_status = 'saldata' and coalesce(amount_paid, 0) = 0 and total is not null;`;
+    return `
+      <div class="list-header"><div class="back" onclick="app.goBack()">‹ ACME</div></div>
+      ${this.error ? `<div class="error-banner">${this.escape(this.error)}</div>` : ''}
+      <div class="topbar"><div class="eyebrow">Impostazioni</div><h1>Calendari</h1></div>
+      ${c.loading ? `<div class="loading"><div class="spinner"></div>Carico le impostazioni…</div>` : `
+      ${c.schemaOk === false ? `
+      <div class="section-title" style="margin-top:0;">Aggiornamento del database</div>
+      <div class="detail-card">
+        <div style="font-size:13.5px; line-height:1.5;">Serve una volta sola per salvare le camere e gli importi incassati. Finché non lo fai l'app funziona, ma senza questi due dati.</div>
+        <ol class="steps"><li>Apri Supabase → <b>SQL Editor</b> → <b>New query</b></li><li>Incolla il comando qui sotto e premi <b>Run</b></li><li>Torna qui: questo riquadro sparisce</li></ol>
+        <textarea readonly class="form-input report-box" style="min-height:150px; margin-top:12px; white-space:pre-wrap;">${this.escape(SQL.replace(/; /g, ';\n'))}</textarea>
+        <button class="btn btn-primary" onclick="app.copyText(this, document.querySelector('.report-box').value)">Copia il comando</button>
+      </div>` : ''}
+
+      <div class="section-title"${c.schemaOk === false ? '' : ' style="margin-top:0;"'}>1 · Booking e Airbnb dentro ACME</div>
+      <div class="detail-card">
+        <div style="font-size:13.5px; line-height:1.5; margin-bottom:12px;">Così ACME vede le date già prenotate sui portali: avvisa nei preventivi e l'IA non conferma notti occupate.</div>
+        <span class="form-label">Link calendario Booking</span>
+        <input id="icalBooking" class="form-input" placeholder="https://admin.booking.com/hotel/hoteladmin/ical.html?t=…" value="${this.escape(c.booking || '')}">
+        <div class="field-hint">Extranet Booking → Tariffe e disponibilità → Sincronizza calendari → Esporta calendario.</div>
+        <span class="form-label">Link calendario Airbnb</span>
+        <input id="icalAirbnb" class="form-input" placeholder="https://www.airbnb.it/calendar/ical/….ics?s=…" value="${this.escape(c.airbnb || '')}">
+        <div class="field-hint">Airbnb → Calendario → Disponibilità → Collega calendari → Esporta calendario.</div>
+        ${c.message ? `<div class="sent-confirm" style="margin:0 0 12px;">${ICON('check')} ${this.escape(c.message)}</div>` : ''}
+        ${(c.errors || []).length ? `<div class="discrepancy-banner">${this.escape(c.errors.join(' · '))}</div>` : ''}
+        <button class="btn btn-primary" ${c.saving ? 'disabled' : ''} onclick="app.saveCalendarSettings()">${c.saving ? 'Verifico i calendari…' : 'Salva e verifica'}</button>
+      </div>
+
+      <div class="section-title">2 · ACME dentro Booking e Airbnb</div>
+      <div class="detail-card">
+        <div style="font-size:13.5px; line-height:1.5;">Le prenotazioni dirette salvate in ACME chiudono le stesse date sui portali. Il link contiene solo le date occupate, nessun dato degli ospiti.</div>
+        <span class="form-label" style="margin-top:14px;">Il tuo link calendario</span>
+        <div class="copy-field">
+          <input class="form-input" readonly value="${this.escape(c.feedUrl || '')}">
+          <button class="btn btn-secondary" style="flex:none; padding:10px 14px;" onclick="app.copyText(this, '${this.escape(c.feedUrl || '')}')">Copia</button>
+        </div>
+        <ol class="steps">
+          <li><b>Booking:</b> Sincronizza calendari → Importa calendario → incolla il link</li>
+          <li><b>Airbnb:</b> Collega calendari → Importa calendario → incolla il link</li>
+          <li>I portali lo rileggono da soli ogni poche ore</li>
+        </ol>
+      </div>`}`;
+  }
+
   openReminders() {
     this.view = 'reminders';
     this.render();
@@ -1801,7 +1928,7 @@ class ACME {
       <div class="booking-row" ${b.code ? `onclick="app.openReminderBooking('${b.code}')"` : ''}>
         <div class="name">${this.escape(b.guest_name)}</div>
         <div class="dates">Check-in <b>${this.formatQuoteDate(b.check_in)}</b>${b.code ? ' · ' + this.escape(b.code) : ''}</div>
-        <div class="rate-info" style="margin-top:4px;">${urgency} — ancora da saldare</div>
+        <div class="rate-info" style="margin-top:4px;">${urgency} — ${b.total ? `da incassare <b>${EUR(this.dueOf(b))}</b>` : 'ancora da saldare'}</div>
       </div>`;
     }).join('');
 
@@ -1849,8 +1976,41 @@ class ACME {
     return list;
   }
 
+  // Importi di una prenotazione. Per quelle salvate prima della colonna
+  // amount_paid si ricava l'incassato dallo stato del pagamento.
+  bookingRooms(b) { return Number(b.rooms) || (Number(b.guests) >= 3 ? 2 : 1); }
+  paidOf(b) {
+    if (b.amount_paid != null && Number(b.amount_paid) > 0) return Number(b.amount_paid);
+    return b.payment_status === 'saldata' ? Number(b.total) || 0 : 0;
+  }
+  dueOf(b) { return Math.max(0, Math.round(((Number(b.total) || 0) - this.paidOf(b)) * 100) / 100); }
+
+  setPaidDraft(value) {
+    this.bookingPaidDraft = value;
+    this.bookingPaidTouched = true;
+    const b = this.selectedBooking;
+    const paid = parseFloat(value) || 0, total = Number(b.total) || 0;
+    // Lo stato segue l'importo: tutto → saldata, qualcosa → acconto, niente → da saldare
+    this.bookingPaymentDraft = total > 0 && paid >= total ? 'saldata' : (paid > 0 ? 'acconto versato' : 'da saldare');
+    const sel = document.getElementById('paymentSelect');
+    if (sel) sel.value = this.bookingPaymentDraft;
+    const due = document.getElementById('dueAmount');
+    if (due) due.textContent = EUR(Math.max(0, total - paid));
+  }
+
+  quickPaid(kind) {
+    const b = this.selectedBooking, total = Number(b.total) || 0;
+    const pct = PR ? PR.PRICING.depositPercent : 30;
+    const v = kind === 'all' ? total : Math.ceil(total * pct / 100);
+    const input = document.getElementById('paidInput');
+    if (input) input.value = v;
+    this.setPaidDraft(String(v));
+  }
+
   openBookingDetail(booking) {
     this.bookingDetailOrigin = this.view;
+    this.bookingPaidDraft = String(this.paidOf(booking) || '');
+    this.bookingPaidTouched = false;
     this.selectedBooking = booking;
     this.bookingNotesDraft = booking.notes || '';
     this.bookingStatusDraft = booking.status || 'confermata';
@@ -1869,6 +2029,7 @@ class ACME {
       const nowConcluded = this.bookingStatusDraft === 'conclusa' || this.bookingStatusDraft === 'cancellata';
       const concludedAt = (wasActive && nowConcluded) ? new Date().toISOString() : undefined;
       const payload = { id: b.id, notes: this.bookingNotesDraft, status: this.bookingStatusDraft, paymentStatus: this.bookingPaymentDraft };
+      if (this.bookingPaidTouched) payload.amountPaid = parseFloat(this.bookingPaidDraft) || 0;
       if (concludedAt) payload.concludedAt = concludedAt;
       const res = await fetch('/api/booking', {
         method: 'PATCH',
@@ -1877,7 +2038,9 @@ class ACME {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Salvataggio fallito');
+      if (data.schemaMissing) this.error = 'Salvato, ma l\'importo incassato non è stato registrato: va prima aggiornato il database (Impostazioni → Calendari e listino).';
       this.selectedBooking = data.booking;
+      this.bookingPaidTouched = false;
       const idx = this.bookings.findIndex(x => x.id === b.id);
       if (idx !== -1) this.bookings[idx] = data.booking;
       if (wasActive && this.bookingStatusDraft === 'conclusa') {
@@ -1987,9 +2150,11 @@ class ACME {
     if (debugScope) {
       window.history.replaceState({}, '', window.location.pathname);
     }
+    await PR_READY;
     const key = localStorage.getItem('claude_api_key');
     if (!key) { this.view = 'setup'; this.render(); return; }
     await this.loadEmails();
+    if (!PR) { this.error = 'Listino prezzi non caricato: ricarica la pagina prima di fare preventivi.'; this.render(); }
     setInterval(() => this.silentRefresh(), 5 * 60 * 1000);
   }
 
@@ -2091,7 +2256,9 @@ class ACME {
       if (pq.rate_per_night != null) { bs.ratePerNight = String(pq.rate_per_night); bs.rateTouched = true; }
       if (pq.discount_percent != null) { bs.discountPercent = String(pq.discount_percent); bs.discountTouched = true; }
       if (pq.guests) bs.guests = pq.guests;
+      if (pq.rooms) { bs.rooms = pq.rooms; bs.roomsTouched = true; }
       bs.prefilledFromQuote = true;
+      this.checkAvailability('emailBookingState');
       bs.quoteSentAt = pq.created_at;
       this.render();
     } catch (e) {}
@@ -2223,8 +2390,77 @@ class ACME {
   }
 
   selectGuests(stateKey, n) {
-    this[stateKey].guests = n;
+    this.updateQuoteField(stateKey, 'guests', n);
     this.render();
+  }
+
+  // Camere aperte: con 3+ ospiti sempre 2; altrimenti la scelta a mano, o 1
+  roomsFor(qs) {
+    if (!PR) return qs.guests >= 3 ? 2 : (qs.rooms || 1);
+    if (Number(qs.guests) >= PR.PRICING.secondRoomFromGuests) return 2;
+    return qs.roomsTouched && qs.rooms ? qs.rooms : PR.suggestedRooms(qs.guests);
+  }
+
+  selectRooms(stateKey, n) {
+    const qs = this[stateKey];
+    qs.rooms = n; qs.roomsTouched = true;
+    this.updateQuoteField(stateKey, 'rooms', n);
+    this.render();
+  }
+
+  toggleSecurityDeposit(stateKey) {
+    this.updateQuoteField(stateKey, 'withSecurityDeposit', !this[stateKey].withSecurityDeposit);
+    this.render();
+  }
+
+  // Parametri per il listino unico (stessi nomi usati dal server)
+  quoteParams(stateKey) {
+    const qs = this[stateKey];
+    return {
+      checkIn: qs.checkIn, checkOut: qs.checkOut,
+      guests: qs.guests, rooms: this.roomsFor(qs),
+      rateOverride: qs.rateTouched && qs.ratePerNight !== '' ? parseFloat(qs.ratePerNight) : undefined,
+      discountPercent: qs.discountPercent === '' ? undefined : parseFloat(qs.discountPercent),
+      withSecurityDeposit: stateKey !== 'emailBookingState' && !!qs.withSecurityDeposit
+    };
+  }
+
+  computeLocalQuote(stateKey) {
+    if (!PR) throw new Error('Listino prezzi non caricato: ricarica la pagina');
+    return PR.computeQuote(this.quoteParams(stateKey));
+  }
+
+  renderPricingFields(stateKey, isQuote) {
+    const qs = this[stateKey];
+    const rooms = this.roomsFor(qs);
+    const forced = PR && Number(qs.guests) >= PR.PRICING.secondRoomFromGuests;
+    const P = PR ? PR.PRICING : null;
+    const previewId = { quoteState: 'quotePreview', standaloneQuoteState: 'standaloneQuotePreview', emailBookingState: 'emailBookingPreview' }[stateKey];
+    return `
+      ${this.renderGuestSelector(stateKey, qs.guests)}
+      <span class="form-label">Camere</span>
+      <div class="guest-selector">
+        <div class="pay-btn ${rooms === 1 ? 'active-dark' : ''} ${forced ? 'disabled' : ''}" onclick="${forced ? '' : `app.selectRooms('${stateKey}', 1)`}">Solo padronale</div>
+        <div class="pay-btn ${rooms === 2 ? 'active-dark' : ''}" onclick="app.selectRooms('${stateKey}', 2)">Due camere</div>
+      </div>
+      <div class="field-hint">${forced ? `Con ${qs.guests} ospiti serve anche la seconda camera.` : (P ? `Seconda camera: +${EUR(P.seasons[1].secondRoomPerNight)}/+${EUR(P.seasons[0].secondRoomPerNight)} a notte (bassa/alta) e ${EUR(P.secondRoomOneOff)} di biancheria.` : '')}</div>
+      <div style="display:flex; gap:10px;">
+        <div style="flex:1; min-width:0;">
+          <span class="form-label">Tariffa/notte (€)</span>
+          <input type="number" step="0.01" class="form-input" placeholder="da listino" value="${qs.rateTouched ? qs.ratePerNight : ''}" oninput="app.updateQuoteField('${stateKey}','ratePerNight', this.value)">
+        </div>
+        <div style="flex:1; min-width:0;">
+          <span class="form-label">Sconto (%)</span>
+          <input type="number" step="1" min="0" max="100" class="form-input" value="${qs.discountPercent}" oninput="app.updateQuoteField('${stateKey}','discountPercent', this.value)">
+        </div>
+      </div>
+      <div class="field-hint">Tariffa vuota = listino, notte per notte secondo la stagione. Sconto suggerito: 15% da 7 notti, 30% da 30.</div>
+      ${isQuote && P ? `
+      <div class="switch-row" onclick="app.toggleSecurityDeposit('${stateKey}')">
+        <span><b>Cauzione ${EUR(P.securityDeposit)}</b><small>Bonifico prima dell'arrivo, restituita dopo il check-out</small></span>
+        <span class="switch ${qs.withSecurityDeposit ? 'on' : ''}"><i></i></span>
+      </div>` : ''}
+      <div class="quote-preview" id="${previewId}"></div>`;
   }
 
   renderGuestSelector(stateKey, current) {
@@ -2511,10 +2747,10 @@ class ACME {
   updateQuoteField(stateKey, field, value) {
     const qs = this[stateKey];
     qs[field] = value;
-    if (field === 'ratePerNight') qs.rateTouched = true;
+    if (field === 'ratePerNight') qs.rateTouched = value !== '';
     if (field === 'discountPercent') qs.discountTouched = true;
     if (field === 'emailMessage') qs.messageTouched = true;
-    if (field === 'checkIn' || field === 'checkOut') this.applySuggestedDefaults(stateKey);
+    if (field === 'checkIn' || field === 'checkOut') { this.applySuggestedDefaults(stateKey); this.checkAvailability(stateKey); }
     // emailBookingState non ha un messaggio email da rigenerare (non invia mail,
     // serve solo a confermare una prenotazione diretta con tariffa/totale)
     const messageElIds = { quoteState: 'quoteMessage', standaloneQuoteState: 'standaloneQuoteMessage' };
@@ -2535,22 +2771,19 @@ class ACME {
 
   buildDefaultQuoteMessage(stateKey) {
     const qs = this[stateKey];
-    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = qs;
-    if (!checkIn || !checkOut || !guestName || !ratePerNight) return '';
-    let nights;
-    try { nights = this.computeNightsPreview(checkIn, checkOut); } catch (e) { return ''; }
-    const rate = parseFloat(ratePerNight) || 0;
-    const discount = parseFloat(discountPercent) || 0;
-    const subtotal = nights * rate;
-    const discountAmount = Math.round(subtotal * discount) / 100;
-    const total = subtotal - discountAmount;
+    const { guestName, checkIn, checkOut } = qs;
+    if (!checkIn || !checkOut || !guestName) return '';
+    let q;
+    try { q = this.computeLocalQuote(stateKey); } catch (e) { return ''; }
     const checkInFmt = this.formatQuoteDate(checkIn);
     const checkOutFmt = this.formatQuoteDate(checkOut);
     return `Gentile ${guestName},
 
-in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${nights} nott${nights === 1 ? 'e' : 'i'}).
+in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${q.nights} nott${q.nights === 1 ? 'e' : 'i'}, ${q.guests} ospit${q.guests === 1 ? 'e' : 'i'}).
 
-Totale soggiorno: ${EUR(total)}${discount > 0 ? ` (sconto ${discount}% per soggiorni lunghi già applicato)` : ''}
+Totale soggiorno: ${EUR(q.total)}${q.discountPercent > 0 ? ` (sconto ${q.discountPercent}% per soggiorni lunghi già applicato)` : ''}
+Per confermare: acconto di ${EUR(q.depositAmount)} (${q.depositPercent}%).${q.securityDeposit ? `
+Cauzione: ${EUR(q.securityDeposit)} con bonifico prima dell'arrivo, restituita dopo il check-out.` : ''}
 
 Resto a disposizione per qualsiasi chiarimento.
 
@@ -2567,20 +2800,45 @@ Domus 106`;
   }
 
   suggestRatePreview(checkInStr) {
-    const checkIn = new Date(checkInStr + 'T00:00:00');
-    const month = checkIn.getMonth() + 1;
-    return (month >= 6 && month <= 9) ? 150 : 80;
+    return PR ? PR.seasonOf(checkInStr).rate : null;
   }
 
   applySuggestedDefaults(stateKey) {
     const qs = this[stateKey];
     const { checkIn, checkOut } = qs;
-    if (!checkIn || !checkOut) return;
+    if (!checkIn || !checkOut || !PR) return;
     try {
-      const nights = this.computeNightsPreview(checkIn, checkOut);
-      if (!qs.rateTouched) qs.ratePerNight = String(this.suggestRatePreview(checkIn));
-      if (!qs.discountTouched) qs.discountPercent = String(nights >= 30 ? 30 : (nights >= 7 ? 15 : 0));
+      const nights = PR.countNights(checkIn, checkOut);
+      if (!qs.discountTouched) qs.discountPercent = String(PR.suggestedDiscount(nights));
     } catch (e) {}
+  }
+
+  // Soggiorni già presenti (ACME, Booking, Airbnb) nelle stesse date
+  async checkAvailability(stateKey) {
+    const qs = this[stateKey];
+    const { checkIn, checkOut } = qs;
+    qs.conflicts = null; qs.availabilityErrors = [];
+    if (!checkIn || !checkOut || checkOut <= checkIn) return;
+    const key = checkIn + checkOut;
+    qs._availKey = key;
+    try {
+      const res = await fetch('/api/booking?' + new URLSearchParams({ availability: '1', checkIn, checkOut }));
+      const data = await res.json().catch(() => ({}));
+      if (qs._availKey !== key || !res.ok) return;
+      qs.conflicts = data.conflicts || [];
+      qs.availabilityErrors = data.errors || [];
+      this.refreshQuotePreview(stateKey);
+    } catch (e) {}
+  }
+
+  renderConflicts(qs) {
+    if (qs.conflicts && qs.conflicts.length) {
+      const items = qs.conflicts.map(c => `<li><b>${this.escape(c.source)}</b> · ${this.formatQuoteDate(c.start)} → ${this.formatQuoteDate(c.end)}${c.source === 'ACME' ? ' · ' + this.escape(c.label) : ''}</li>`).join('');
+      return `<div class="error-banner" style="margin-bottom:12px;"><b>Date già occupate</b><ul class="conflict-list">${items}</ul></div>`;
+    }
+    const errs = qs.availabilityErrors && qs.availabilityErrors.length
+      ? `<div class="discrepancy-banner" style="margin-bottom:12px;">Disponibilità non verificata del tutto: ${this.escape(qs.availabilityErrors.join('; '))}</div>` : '';
+    return errs || (qs.conflicts ? `<div class="avail-ok">${ICON('check')} Date libere su ACME${qs.availabilityErrors && qs.availabilityErrors.length ? '' : ', Booking e Airbnb collegati'}</div>` : '');
   }
 
   refreshQuotePreview(stateKey) {
@@ -2588,46 +2846,33 @@ Domus 106`;
     const previewEl = document.getElementById(previewElIds[stateKey]);
     if (!previewEl) return;
     const qs = this[stateKey];
-    const { checkIn, checkOut, ratePerNight, discountPercent } = qs;
-    if (!checkIn || !checkOut || !ratePerNight) { previewEl.innerHTML = ''; return; }
+    if (!qs.checkIn || !qs.checkOut) { previewEl.innerHTML = ''; return; }
     try {
-      const nights = this.computeNightsPreview(checkIn, checkOut);
-      const rate = parseFloat(ratePerNight) || 0;
-      const discount = parseFloat(discountPercent) || 0;
-      const subtotal = nights * rate;
-      const discountAmount = Math.round(subtotal * discount) / 100;
-      const total = subtotal - discountAmount;
+      const q = this.computeLocalQuote(stateKey);
+      const misto = q.groups.length > 1;
+      const rows = q.groups.map(g => `<div class="detail-row"><span class="label">${g.nights} nott${g.nights === 1 ? 'e' : 'i'}${misto ? ' ' + g.season.toLowerCase().replace(' stagione', '') : ''} × ${EUR(g.rate)}</span>${EUR(g.nights * g.rate)}</div>`).join('');
       previewEl.innerHTML = `
-        <div class="detail-row"><span class="label">Notti</span>${nights}</div>
-        <div class="detail-row"><span class="label">Subtotale</span>${EUR(subtotal)}</div>
-        ${discount > 0 ? `<div class="detail-row"><span class="label">Sconto (${discount}%)</span>− ${EUR(discountAmount)}</div>` : ''}
-        <div class="detail-row" style="font-weight:700; font-size:16px; margin-top:8px;"><span class="label">Totale</span>${EUR(total)}</div>`;
+        ${this.renderConflicts(qs)}
+        ${rows}
+        ${q.rooms === 2 ? `<div class="detail-row"><span class="label">Seconda camera · ${q.nights} notti</span>${EUR(q.secondRoomNightly)}</div>
+        <div class="detail-row"><span class="label">Biancheria seconda camera</span>${EUR(q.secondRoomOneOff)}</div>` : ''}
+        ${q.discountPercent > 0 ? `<div class="detail-row"><span class="label">Sconto ${q.discountPercent}% sulle notti</span>− ${EUR(q.discountAmount)}</div>` : ''}
+        <div class="preview-total"><span>Totale</span><b>${EUR(q.total)}</b></div>
+        <div class="detail-row" style="margin:0;"><span class="label">Acconto ${q.depositPercent}%</span>${EUR(q.depositAmount)}${q.securityDeposit ? ` · cauzione ${EUR(q.securityDeposit)}` : ''}</div>`;
     } catch (err) {
-      previewEl.innerHTML = `<div class="detail-row" style="color:var(--red)">${this.escape(err.message)}</div>`;
+      previewEl.innerHTML = `${this.renderConflicts(qs)}<div class="detail-row" style="color:var(--red)">${this.escape(err.message)}</div>`;
     }
   }
 
   async generateQuoteMessageWithAI(stateKey) {
     const qs = this[stateKey];
-    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = qs;
-    if (!guestName || !checkIn || !checkOut || !ratePerNight) {
-      this.error = 'Compila nome ospite, date e tariffa prima di generare il messaggio';
+    const { guestName, checkIn, checkOut } = qs;
+    if (!guestName || !checkIn || !checkOut) {
+      this.error = 'Compila nome ospite e date prima di generare il messaggio';
       this.render();
       return;
     }
-    let nights, subtotal, discountAmount, total;
-    try {
-      nights = this.computeNightsPreview(checkIn, checkOut);
-    } catch (e) {
-      this.error = e.message;
-      this.render();
-      return;
-    }
-    const rate = parseFloat(ratePerNight) || 0;
-    const discount = parseFloat(discountPercent) || 0;
-    subtotal = nights * rate;
-    discountAmount = Math.round(subtotal * discount) / 100;
-    total = subtotal - discountAmount;
+    try { this.computeLocalQuote(stateKey); } catch (e) { this.error = e.message; this.render(); return; }
 
     qs.generatingMessage = true;
     this.error = null;
@@ -2644,13 +2889,7 @@ Domus 106`;
           originalSubject: this.selectedEmail.subject,
           originalBody: this.selectedEmail.body,
           guestName,
-          checkInFmt: this.formatQuoteDate(checkIn),
-          checkOutFmt: this.formatQuoteDate(checkOut),
-          nights,
-          ratePerNight: rate,
-          discountPercent: discount,
-          total: total.toFixed(2),
-          season: this.suggestRatePreview(checkIn) === 150 ? 'Alta stagione' : 'Bassa stagione'
+          ...this.quoteParams(stateKey)
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -2668,9 +2907,9 @@ Domus 106`;
 
   async shareQuotePdf(stateKey) {
     const qs = this[stateKey];
-    const { checkIn, checkOut, guestName, ratePerNight, discountPercent } = qs;
-    if (!checkIn || !checkOut || !guestName.trim() || !ratePerNight) {
-      this.error = 'Compila nome ospite, date e tariffa prima di condividere';
+    const { checkIn, checkOut, guestName } = qs;
+    if (!checkIn || !checkOut || !guestName.trim()) {
+      this.error = 'Compila nome ospite e date prima di condividere';
       this.render();
       return;
     }
@@ -2681,7 +2920,7 @@ Domus 106`;
       const res = await fetch('/api/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pdf', guestName, checkIn, checkOut, ratePerNight, discountPercent })
+        body: JSON.stringify({ action: 'pdf', guestName, ...this.quoteParams(stateKey) })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Generazione PDF fallita');
@@ -2749,7 +2988,7 @@ Domus 106`;
     return lines.join('\r\n');
   }
 
-  async confirmBooking(stateKey) {
+  async confirmBooking(stateKey, force = false) {
     const qs = this[stateKey];
     const { guestName, checkIn, checkOut } = qs;
     if (!guestName || !checkIn || !checkOut) {
@@ -2757,15 +2996,31 @@ Domus 106`;
       this.render();
       return;
     }
-    let total = null;
-    try {
-      const nights = this.computeNightsPreview(checkIn, checkOut);
-      const rate = parseFloat(qs.ratePerNight) || 0;
-      const discount = parseFloat(qs.discountPercent) || 0;
-      const subtotal = nights * rate;
-      const discountAmount = Math.round(subtotal * discount) / 100;
-      total = subtotal - discountAmount;
-    } catch (e) {}
+    let q;
+    try { q = this.computeLocalQuote(stateKey); } catch (e) { this.error = e.message; this.render(); return; }
+    const total = q.total;
+
+    // Controllo doppie prenotazioni: sempre aggiornato al momento della conferma
+    if (!force) {
+      qs.confirming = true; this.render();
+      await this.checkAvailability(stateKey);
+      qs.confirming = false;
+      if (qs.conflicts && qs.conflicts.length) {
+        this.render();
+        const list = qs.conflicts.map(c => `${this.escape(c.source)}: ${this.formatQuoteDate(c.start)} → ${this.formatQuoteDate(c.end)}`).join('<br>');
+        this.showConfirmDialog({
+          title: 'Date già occupate',
+          desc: `Queste notti risultano già prese:<br>${list}<br><br>Salvare lo stesso?`,
+          confirmLabel: 'Salva lo stesso',
+          icon: 'alert',
+          onConfirm: () => this.confirmBooking(stateKey, true)
+        });
+        return;
+      }
+    }
+    // Incassato iniziale coerente con lo stato del pagamento scelto
+    const pay = qs.paymentStatus || 'da saldare';
+    const amountPaid = pay === 'saldata' ? total : (pay === 'acconto versato' ? q.depositAmount : 0);
 
     const hasSourceEmail = (stateKey === 'quoteState' || stateKey === 'emailBookingState') && this.selectedEmail;
     const guestEmail = hasSourceEmail
@@ -2795,8 +3050,10 @@ Domus 106`;
           notes: qs.notes || null,
           guests: qs.guests || null,
           paymentStatus: qs.paymentStatus || 'da saldare',
-          ratePerNight: qs.ratePerNight ? parseFloat(qs.ratePerNight) : null,
-          discountPercent: qs.discountPercent ? parseFloat(qs.discountPercent) : null,
+          ratePerNight: q.ratePerNight,
+          discountPercent: q.discountPercent || null,
+          rooms: q.rooms,
+          amountPaid,
           sourceFrom: hasSourceEmail ? this.selectedEmail.from : null,
           sourceSubject: hasSourceEmail ? this.selectedEmail.subject : null,
           sourceBody: hasSourceEmail ? (this.selectedEmail.body || '').slice(0, 300) : null
@@ -2884,12 +3141,14 @@ Domus 106`;
 
   async sendQuote(stateKey) {
     const qs = this[stateKey];
-    const { checkIn, checkOut, guestName, ratePerNight, discountPercent, emailMessage } = qs;
-    if (!checkIn || !checkOut || !guestName.trim() || !ratePerNight) {
-      this.error = 'Compila nome ospite, date e tariffa prima di inviare';
+    const { checkIn, checkOut, guestName, emailMessage } = qs;
+    if (!checkIn || !checkOut || !guestName.trim()) {
+      this.error = 'Compila nome ospite e date prima di inviare';
       this.render();
       return;
     }
+    let q;
+    try { q = this.computeLocalQuote(stateKey); } catch (e) { this.error = e.message; this.render(); return; }
     const to = stateKey === 'quoteState'
       ? this.extractEmailAddress(this.selectedEmail.from)
       : (qs.recipientEmail || '').trim();
@@ -2913,7 +3172,7 @@ Domus 106`;
       const res = await fetch('/api/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', to: deliverTo, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage })
+        body: JSON.stringify({ action: 'send', to: deliverTo, guestName, emailMessage, ...this.quoteParams(stateKey) })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -2930,9 +3189,11 @@ Domus 106`;
         body: JSON.stringify({
           savePendingQuote: true,
           guestEmail: to, guestName, checkIn, checkOut,
-          ratePerNight: parseFloat(ratePerNight) || null,
-          discountPercent: parseFloat(discountPercent) || null,
+          // tariffa salvata solo se forzata a mano: altrimenti vale il listino
+          ratePerNight: qs.rateTouched ? (parseFloat(qs.ratePerNight) || null) : null,
+          discountPercent: q.discountPercent || null,
           guests: qs.guests || null,
+          rooms: q.rooms,
           total: data.total,
           sourceSubject: this.selectedEmail ? this.selectedEmail.subject : null
         })
@@ -3102,6 +3363,7 @@ Domus 106`;
     else if (this.view === 'statisticsMonth') { this.view = 'statistics'; this.selectedStatsMonth = null; }
     else if (this.view === 'reminders') { this.view = 'dashboard'; }
     else if (this.view === 'testLab') { this.view = 'dashboard'; }
+    else if (this.view === 'calendarSettings') { this.view = 'dashboard'; }
     else if (this.view === 'bookingDetail') { this.view = this.bookingDetailOrigin || 'bookingsList'; this.selectedBooking = null; }
     this.render();
   }
@@ -3309,6 +3571,7 @@ Domus 106`;
         ${row('app.openBookingsList()', 'calendar', 'Prenotazioni confermate', true)}
         ${row('app.openBookingHistory()', 'archive', 'Storico prenotazioni', true)}
         ${row('app.openStatistics()', 'chart', 'Statistiche', true)}
+        ${row('app.openCalendarSettings()', 'calendar', 'Calendari Booking e Airbnb', true)}
       </div>
 
       <div class="refresh-row">
@@ -3422,19 +3685,7 @@ Domus 106`;
             <input type="date" class="form-input" value="${bs.checkOut}" oninput="app.updateQuoteField('emailBookingState','checkOut', this.value)">
           </div>
         </div>
-        <div style="display:flex; gap:10px;">
-          <div style="flex:1; min-width:0;">
-            <span class="form-label">Tariffa/notte (€)</span>
-            <input type="number" step="0.01" class="form-input" value="${bs.ratePerNight}" oninput="app.updateQuoteField('emailBookingState','ratePerNight', this.value)">
-          </div>
-          <div style="flex:1; min-width:0;">
-            <span class="form-label">Sconto (%)</span>
-            <input type="number" step="1" min="0" max="100" class="form-input" value="${bs.discountPercent}" oninput="app.updateQuoteField('emailBookingState','discountPercent', this.value)">
-          </div>
-        </div>
-        <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
-        <div class="quote-preview" id="emailBookingPreview"></div>
-        ${this.renderGuestSelector('emailBookingState', bs.guests)}
+        ${this.renderPricingFields('emailBookingState', false)}
         ${this.renderPaymentSelector('emailBookingState', bs.paymentStatus)}
         <span class="form-label">Note</span>
         <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('emailBookingState','notes', this.value)">${this.escape(bs.notes)}</textarea>
@@ -3472,21 +3723,9 @@ Domus 106`;
               <input type="date" class="form-input" value="${this.quoteState.checkOut}" oninput="app.updateQuoteField('quoteState','checkOut', this.value)">
             </div>
           </div>
-          ${this.renderGuestSelector('quoteState', this.quoteState.guests)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('quoteState','notes', this.value)">${this.escape(this.quoteState.notes)}</textarea>
-          <div style="display:flex; gap:10px;">
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Tariffa/notte (€)</span>
-              <input type="number" step="0.01" class="form-input" value="${this.quoteState.ratePerNight}" oninput="app.updateQuoteField('quoteState','ratePerNight', this.value)">
-            </div>
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Sconto (%)</span>
-              <input type="number" step="1" min="0" max="100" class="form-input" value="${this.quoteState.discountPercent}" oninput="app.updateQuoteField('quoteState','discountPercent', this.value)">
-            </div>
-          </div>
-          <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
-          <div class="quote-preview" id="quotePreview"></div>
+          ${this.renderPricingFields('quoteState', true)}
           <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
             <span class="form-label" style="margin-bottom:0;">Messaggio email di accompagnamento</span>
             <a style="font-size:12px; ${this.quoteState.generatingMessage ? 'opacity:0.5; pointer-events:none;' : ''}" onclick="app.generateQuoteMessageWithAI('quoteState')">${ICON('sparkle')} ${this.quoteState.generatingMessage ? 'Generazione…' : 'Genera con IA'}</a>
@@ -3568,21 +3807,9 @@ Domus 106`;
               <input type="date" class="form-input" value="${qs.checkOut}" oninput="app.updateQuoteField('standaloneQuoteState','checkOut', this.value)">
             </div>
           </div>
-          ${this.renderGuestSelector('standaloneQuoteState', qs.guests)}
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:70px; resize:vertical;" placeholder="Es. arriva in ritardo, richiede una culla…" oninput="app.updateQuoteField('standaloneQuoteState','notes', this.value)">${this.escape(qs.notes)}</textarea>
-          <div style="display:flex; gap:10px;">
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Tariffa/notte (€)</span>
-              <input type="number" step="0.01" class="form-input" value="${qs.ratePerNight}" oninput="app.updateQuoteField('standaloneQuoteState','ratePerNight', this.value)">
-            </div>
-            <div style="flex:1; min-width:0;">
-              <span class="form-label">Sconto (%)</span>
-              <input type="number" step="1" min="0" max="100" class="form-input" value="${qs.discountPercent}" oninput="app.updateQuoteField('standaloneQuoteState','discountPercent', this.value)">
-            </div>
-          </div>
-          <div style="font-size:11px; color:var(--text-secondary); margin:-2px 0 12px;">Scaglioni consigliati: 7+ notti → 15% · 30+ notti → 30% (valori pre-compilati, modificabili a mano)</div>
-          <div class="quote-preview" id="standaloneQuotePreview"></div>
+          ${this.renderPricingFields('standaloneQuoteState', true)}
           <span class="form-label">Messaggio email di accompagnamento</span>
           <textarea id="standaloneQuoteMessage" class="form-input" style="min-height:170px; line-height:1.5; white-space:pre-wrap; resize:vertical;" oninput="app.updateQuoteField('standaloneQuoteState','emailMessage', this.value)">${this.escape(qs.emailMessage)}</textarea>
           <div class="btn-row">
@@ -3624,11 +3851,12 @@ Domus 106`;
           <div class="name">${this.escape(b.guest_name)}</div>
           ${b.total ? `<div class="total">${EUR(b.total)}</div>` : ''}
         </div>
-        ${b.rate_per_night ? `<div class="rate-info">${EUR(b.rate_per_night)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''}</div>` : ''}
+        ${b.rate_per_night ? `<div class="rate-info">${EUR(b.rate_per_night)}/notte${b.discount_percent ? ' · sconto ' + b.discount_percent + '%' : ''} · ${this.bookingRooms(b) === 2 ? '2 camere' : '1 camera'}</div>` : ''}
         <div class="dates"><b>${checkInFmt}</b> → <b>${checkOutFmt}</b></div>
         <div class="chip-row">
           <span class="chip ${statusClass}">${this.escape(status)}</span>
           <span class="chip ${paymentClass}">${paymentLabel}</span>
+          ${b.total && this.dueOf(b) > 0 && status !== 'cancellata' && payment !== 'saldata' ? `<span class="chip chip-due">da incassare ${EUR(this.dueOf(b))}</span>` : ''}
           ${b.guests ? `<span class="chip chip-guests">${ICON('user')} ${b.guests}</span>` : ''}
           ${this.isTestAddr(b.guest_email) ? `<span class="chip chip-code">${ICON('flask')} test</span>` : ''}
           <span class="chip chip-code">${b.code ? this.escape(b.code) : 'senza codice'}</span>
@@ -3805,8 +4033,9 @@ Domus 106`;
         <div class="detail-row"><span class="label">Check-in</span><b>${checkInFmt}</b></div>
         <div class="detail-row"><span class="label">Check-out</span><b>${checkOutFmt}</b></div>
         ${b.guests ? `<div class="detail-row"><span class="label">Ospiti</span>${b.guests}</div>` : ''}
+        <div class="detail-row"><span class="label">Camere</span>${this.bookingRooms(b) === 2 ? 'Due camere' : 'Solo padronale'}</div>
         ${b.total ? `<div class="detail-row"><span class="label">Totale</span>${EUR(b.total)}</div>` : ''}
-        ${b.rate_per_night ? `<div class="detail-row"><span class="label">Tariffa</span>${EUR(b.rate_per_night)}/notte</div>` : ''}
+        ${b.rate_per_night ? `<div class="detail-row"><span class="label">Tariffa media</span>${EUR(b.rate_per_night)}/notte</div>` : ''}
         ${b.discount_percent ? `<div class="detail-row"><span class="label">Sconto</span>${b.discount_percent}%</div>` : ''}
       </div>
       ${hasSource ? `
@@ -3824,12 +4053,21 @@ Domus 106`;
           <div class="discrepancy-banner">Conclusa da più di 48 ore: ora è solo consultabile, non più modificabile né ripristinabile tra le prenotazioni in corso.</div>
           <div class="detail-row"><span class="label">Stato soggiorno</span>${this.escape(b.status || 'confermata')}</div>
           <div class="detail-row"><span class="label">Stato pagamento</span>${this.escape(b.payment_status || 'da saldare')}</div>
+          ${b.total ? `<div class="detail-row"><span class="label">Incassato</span>${EUR(this.paidOf(b))}${this.dueOf(b) > 0 ? ` · da incassare ${EUR(this.dueOf(b))}` : ''}</div>` : ''}
           ${b.notes ? `<div class="detail-row"><span class="label">Note</span></div><div class="original-text">${this.escape(b.notes)}</div>` : ''}
         ` : `
           <span class="form-label">Stato soggiorno</span>
           <select class="form-input" onchange="app.bookingStatusDraft = this.value">${statusOptions}</select>
+          ${b.total ? `
+          <span class="form-label">Incassato (€)</span>
+          <div class="copy-field" style="margin-bottom:8px;">
+            <input id="paidInput" type="number" step="0.01" min="0" class="form-input" value="${this.escape(this.bookingPaidDraft || '')}" placeholder="0" oninput="app.setPaidDraft(this.value)">
+            <button class="btn btn-secondary" style="flex:none; padding:10px 12px;" onclick="app.quickPaid('deposit')">Acconto</button>
+            <button class="btn btn-secondary" style="flex:none; padding:10px 12px;" onclick="app.quickPaid('all')">Tutto</button>
+          </div>
+          <div class="money-row"><span class="form-label" style="margin:0;">Da incassare</span><b id="dueAmount">${EUR(Math.max(0, (Number(b.total) || 0) - (parseFloat(this.bookingPaidDraft) || 0)))}</b></div>` : ''}
           <span class="form-label">Stato pagamento</span>
-          <select class="form-input" onchange="app.bookingPaymentDraft = this.value">${paymentOptions}</select>
+          <select id="paymentSelect" class="form-input" onchange="app.bookingPaymentDraft = this.value">${paymentOptions}</select>
           <span class="form-label">Note</span>
           <textarea class="form-input" style="min-height:90px; resize:vertical;" placeholder="Es. arriva in ritardo, ha chiesto una culla…" oninput="app.bookingNotesDraft = this.value">${this.escape(this.bookingNotesDraft)}</textarea>
           <button class="btn btn-primary" ${this.bookingSaving ? 'disabled' : ''} onclick="app.saveBookingDetail()">${this.bookingSaving ? 'Salvataggio…' : 'Salva modifiche'}</button>
@@ -3880,6 +4118,7 @@ Domus 106`;
     else if (this.view === 'reminders') el.innerHTML = this.renderReminders();
     else if (this.view === 'testLab') el.innerHTML = this.renderTestLab();
     else if (this.view === 'bookingDetail') el.innerHTML = this.renderBookingDetail();
+    else if (this.view === 'calendarSettings') el.innerHTML = this.renderCalendarSettings();
     this.updateAppBadge();
   }
 

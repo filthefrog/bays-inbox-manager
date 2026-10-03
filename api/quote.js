@@ -1,6 +1,7 @@
 import { Buffer } from 'buffer';
 import { getFreshAccessToken } from '../lib/gmail-token.js';
-import { buildQuoteTotals } from '../lib/pricing.js';
+import { computeQuote } from '../lib/pricing.js';
+import { KNOWLEDGE_BASE } from '../lib/analyze-email.js';
 import { buildQuotePdf } from '../lib/quote-pdf.js';
 
 // Un solo endpoint per tutto ciò che riguarda i preventivi (genera+invia,
@@ -12,8 +13,33 @@ function wrapBase64(str) {
   return str.match(/.{1,76}/g).join('\r\n');
 }
 
-async function buildPdfPackage({ guestName, checkIn, checkOut, ratePerNight, discountPercent }) {
-  const quote = buildQuoteTotals({ checkIn, checkOut, ratePerNight, discountPercent });
+const eur = (n) => '€ ' + Number(n).toLocaleString('it-IT', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2, useGrouping: 'always' });
+
+// Dati del preventivo dal corpo della richiesta. "ratePerNight" resta accettato
+// come tariffa forzata per compatibilità con le versioni precedenti dell'app.
+function quoteInput(body) {
+  const b = body || {};
+  return {
+    guestName: (b.guestName || '').trim(),
+    checkIn: b.checkIn, checkOut: b.checkOut,
+    guests: b.guests, rooms: b.rooms,
+    rateOverride: b.rateOverride !== undefined ? b.rateOverride : b.ratePerNight,
+    discountPercent: b.discountPercent,
+    withSecurityDeposit: !!b.withSecurityDeposit
+  };
+}
+
+// Riepilogo in parole, uguale per l'email automatica e per il prompt dell'IA
+function quoteLines(q) {
+  const L = q.groups.map(g => `${g.nights} nott${g.nights === 1 ? 'e' : 'i'} in ${g.season.toLowerCase()} a ${eur(g.rate)}`);
+  if (q.rooms === 2) L.push(`seconda camera: ${eur(q.secondRoomNightly)} per le notti più ${eur(q.secondRoomOneOff)} di biancheria e pulizia`);
+  if (q.discountPercent > 0) L.push(`sconto soggiorni lunghi ${q.discountPercent}%: − ${eur(q.discountAmount)}`);
+  return L;
+}
+
+async function buildPdfPackage(input) {
+  const { guestName, checkIn, checkOut } = input;
+  const quote = computeQuote(input);
   const issuedDate = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
   const checkInFmt = new Date(checkIn + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
   const checkOutFmt = new Date(checkOut + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -22,19 +48,6 @@ async function buildPdfPackage({ guestName, checkIn, checkOut, ratePerNight, dis
   return { pdfBuffer, filename, quote, checkInFmt, checkOutFmt };
 }
 
-const KNOWLEDGE_BASE = `
-- Nome struttura: Domus 106
-- Indirizzo: Via Papa Giovanni XXIII, 106, Civitanova Marche (MC)
-- Tipo: Affittacamere (NON B&B — colazione non inclusa)
-- 2 camere matrimoniali, 4 posti letto totali, 2 bagni completi, 75 mq, piano 1° con ascensore
-- Parcheggio: garage privato coperto e interrato incluso
-- WiFi: fibra ottica
-- Check-in: qualsiasi ora (self check-in con codice digitale)
-- Check-out: entro le 11:00
-- Tariffe: bassa stagione 80€/notte, alta stagione (giugno-settembre) 150€/notte; sconto 15% per soggiorni di 7+ notti, 30% per 30+ notti
-- Spiaggia a circa 1,6 km
-- Cancellazione: entro 14 giorni dall'arrivo rimborso totale; 7-14 giorni rimborso 50%; entro 7 giorni nessun rimborso
-`;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -48,10 +61,15 @@ export default async function handler(req, res) {
     const apiKey = req.headers['x-claude-key'];
     if (!apiKey) return res.status(400).json({ error: 'Claude API key required' });
 
-    const { originalSubject, originalBody, guestName, checkInFmt, checkOutFmt, nights, ratePerNight, discountPercent, total, season } = req.body;
-    if (!guestName || !checkInFmt || !checkOutFmt || !nights || !ratePerNight || !total) {
+    const { originalSubject, originalBody } = req.body;
+    const input = quoteInput(req.body);
+    if (!input.guestName || !input.checkIn || !input.checkOut) {
       return res.status(400).json({ error: 'Dati del preventivo mancanti' });
     }
+    let q;
+    try { q = computeQuote(input); } catch (err) { return res.status(400).json({ error: err.message }); }
+    const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+    const guestName = input.guestName, checkInFmt = fmt(input.checkIn), checkOutFmt = fmt(input.checkOut);
 
     const prompt = `Sei l'assistente di gestione per Domus 106, un affittacamere a Civitanova Marche. Il gestore ha già preparato un preventivo di soggiorno per un cliente e lo allegherà in PDF a questa email. Il tuo compito è scrivere SOLO il testo dell'email di accompagnamento.
 
@@ -66,10 +84,10 @@ PREVENTIVO GIÀ CALCOLATO (non ricalcolare nulla, usa questi numeri così come s
 - Ospite: ${guestName}
 - Check-in: ${checkInFmt}
 - Check-out: ${checkOutFmt}
-- Notti: ${nights}
-- Stagione: ${season || ''}
-- Tariffa a notte: € ${ratePerNight}
-${discountPercent > 0 ? `- Sconto applicato: ${discountPercent}%\n` : ''}- Totale soggiorno: € ${total}
+- Notti: ${q.nights} · Ospiti: ${q.guests} · Camere: ${q.rooms === 2 ? 'entrambe' : 'solo la padronale (la seconda resta chiusa)'}
+${quoteLines(q).map(l => '- ' + l).join('\n')}
+- Totale soggiorno: ${eur(q.total)}
+- Acconto per confermare (${q.depositPercent}%): ${eur(q.depositAmount)}${q.securityDeposit ? `\n- Cauzione: ${eur(q.securityDeposit)} con bonifico prima dell'arrivo, restituita dopo il check-out` : ''}
 
 ISTRUZIONI:
 - Scrivi un'email di risposta che affronti DAVVERO quello che il cliente ha scritto: se ha fatto domande specifiche (su parcheggio, orari, servizi, ecc.) rispondi anche a quelle usando i dati reali sopra, non solo il preventivo
@@ -98,13 +116,13 @@ ISTRUZIONI:
 
   // --- genera solo il PDF, nessun invio, nessuna autenticazione Gmail necessaria ---
   if (action === 'pdf') {
-    const { guestName, checkIn, checkOut, ratePerNight, discountPercent } = req.body;
-    if (!guestName || !checkIn || !checkOut || !ratePerNight) {
-      return res.status(400).json({ error: 'Dati mancanti: nome ospite, date e tariffa sono obbligatori' });
+    const input = quoteInput(req.body);
+    if (!input.guestName || !input.checkIn || !input.checkOut) {
+      return res.status(400).json({ error: 'Dati mancanti: nome ospite e date sono obbligatori' });
     }
     try {
-      const { pdfBuffer, filename, quote } = await buildPdfPackage({ guestName, checkIn, checkOut, ratePerNight, discountPercent });
-      return res.status(200).json({ pdfBase64: pdfBuffer.toString('base64'), filename, total: quote.total, nights: quote.nights });
+      const { pdfBuffer, filename, quote } = await buildPdfPackage(input);
+      return res.status(200).json({ pdfBase64: pdfBuffer.toString('base64'), filename, total: quote.total, nights: quote.nights, quote });
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -123,19 +141,22 @@ ISTRUZIONI:
     });
   }
 
-  const { to, guestName, checkIn, checkOut, ratePerNight, discountPercent, emailMessage } = req.body;
-  if (!to || !guestName || !checkIn || !checkOut || !ratePerNight) {
-    return res.status(400).json({ error: 'Dati mancanti: destinatario, nome ospite, date e tariffa sono obbligatori' });
+  const { to, emailMessage } = req.body;
+  const input = quoteInput(req.body);
+  const guestName = input.guestName;
+  if (!to || !guestName || !input.checkIn || !input.checkOut) {
+    return res.status(400).json({ error: 'Dati mancanti: destinatario, nome ospite e date sono obbligatori' });
   }
 
   try {
-    const { pdfBuffer, filename, quote, checkInFmt, checkOutFmt } = await buildPdfPackage({ guestName, checkIn, checkOut, ratePerNight, discountPercent });
+    const { pdfBuffer, filename, quote, checkInFmt, checkOutFmt } = await buildPdfPackage(input);
 
     const emailText = (emailMessage && emailMessage.trim()) ? emailMessage : `Gentile ${guestName},
 
 in allegato trova il preventivo richiesto per il Suo soggiorno presso Domus 106 dal ${checkInFmt} al ${checkOutFmt} (${quote.nights} nott${quote.nights === 1 ? 'e' : 'i'}).
 
-Totale soggiorno: € ${quote.total.toLocaleString('it-IT', { minimumFractionDigits: quote.total % 1 ? 2 : 0, maximumFractionDigits: 2, useGrouping: 'always' })}${quote.discountPercent > 0 ? ` (sconto ${quote.discountPercent}% per soggiorni lunghi già applicato)` : ''}
+Totale soggiorno: ${eur(quote.total)}${quote.discountPercent > 0 ? ` (sconto ${quote.discountPercent}% per soggiorni lunghi già applicato)` : ''}
+Per confermare: acconto di ${eur(quote.depositAmount)} (${quote.depositPercent}%).
 
 Resto a disposizione per qualsiasi chiarimento.
 
@@ -194,7 +215,7 @@ Domus 106`;
       }
     } catch (e) {}
 
-    return res.status(200).json({ success: true, messageId: result.id, confirmed, total: quote.total, nights: quote.nights });
+    return res.status(200).json({ success: true, messageId: result.id, confirmed, total: quote.total, nights: quote.nights, quote });
   } catch (error) {
     console.error('Errore generazione preventivo:', error);
     return res.status(500).json({ error: error.message });

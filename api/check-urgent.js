@@ -1,6 +1,21 @@
 import { getFreshAccessToken } from '../lib/gmail-token.js';
 import { sendPushToAll } from '../lib/send-push.js';
 import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
+import { getOccupied, occupiedText } from '../lib/availability.js';
+import { romeDate } from '../lib/auth.js';
+
+const MAX_NEW_PER_RUN = 8;
+
+// Date occupate per i prossimi 12 mesi, come contesto per l'IA. Non fatale:
+// se il calendario non si legge, l'analisi procede senza.
+async function occupiedContext() {
+  try {
+    const today = romeDate();
+    const { ranges } = await getOccupied({ from: today, to: romeDate(365) });
+    return { today, occupied: ranges.length ? occupiedText(ranges) : '- nessuna data occupata nei prossimi 12 mesi' };
+  } catch (e) { return {}; }
+}
+
 
 // Endpoint pensato per essere richiamato da uno scheduler esterno (GitHub Actions)
 // ogni 5 minuti. Fa il minimo indispensabile per restare economico:
@@ -97,7 +112,7 @@ export default async function handler(req, res) {
     }
 
     const listResponse = await fetch(
-      "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me") + "&maxResults=8",
+      "https://www.googleapis.com/gmail/v1/users/me/messages?q=" + encodeURIComponent("is:inbox -from:me") + "&maxResults=25",
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -142,13 +157,14 @@ export default async function handler(req, res) {
     const cachedRows = cacheResp.ok ? await cacheResp.json() : [];
     const cachedIds = new Set(cachedRows.map(r => r.id));
 
-    const toAnalyze = emails.filter(e => !cachedIds.has(e.id));
+    const toAnalyze = emails.filter(e => !cachedIds.has(e.id)).slice(0, MAX_NEW_PER_RUN);
 
     if (toAnalyze.length === 0) {
       return res.status(200).json({ checked: emails.length, newlyAnalyzed: 0, urgent: 0, checkoutReminder });
     }
 
-    const results = await Promise.allSettled(toAnalyze.map(email => analyzeAndRespond(email, CLAUDE_KEY)));
+    const context = await occupiedContext();
+    const results = await Promise.allSettled(toAnalyze.map(email => analyzeAndRespond(email, CLAUDE_KEY, context)));
 
     const toSave = [];
     const urgent = [];

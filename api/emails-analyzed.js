@@ -2,6 +2,24 @@ import { getFreshAccessToken } from '../lib/gmail-token.js';
 import { sendPushToAll } from '../lib/send-push.js';
 import { analyzeAndRespond, extractBody } from '../lib/analyze-email.js';
 import { LABEL_NAME } from './test-lab.js';
+import { getOccupied, occupiedText } from '../lib/availability.js';
+import { romeDate } from '../lib/auth.js';
+
+// Quante email nuove analizzare al massimo per richiesta: oltre, Vercel
+// rischia di interrompere la funzione (limite di tempo). Le altre vengono
+// analizzate al giro successivo o dal controllo automatico ogni 5 minuti.
+const MAX_NEW_PER_RUN = 8;
+
+// Date occupate per i prossimi 12 mesi, come contesto per l'IA. Non fatale:
+// se il calendario non si legge, l'analisi procede senza.
+async function occupiedContext() {
+  try {
+    const today = romeDate();
+    const { ranges } = await getOccupied({ from: today, to: romeDate(365) });
+    return { today, occupied: ranges.length ? occupiedText(ranges) : '- nessuna data occupata nei prossimi 12 mesi' };
+  } catch (e) { return {}; }
+}
+
 
 export default async function handler(req, res) {
   const refreshToken = req.cookies.gmail_refresh;
@@ -53,7 +71,7 @@ export default async function handler(req, res) {
     //   gli stessi 8 posti: altrimenti basta un po' di traffico vero perché
     //   le mail di prova spariscano dalla Dashboard senza nessun errore.
     const [real, test] = await Promise.all([
-      listMessageIds(`is:inbox -from:me -label:${LABEL_NAME}`, 8),
+      listMessageIds(`is:inbox -from:me -label:${LABEL_NAME}`, 25),
       listMessageIds(`is:inbox label:${LABEL_NAME}`, 20)
     ]);
 
@@ -125,10 +143,14 @@ export default async function handler(req, res) {
       }
     }
 
-    // Analizza solo le email NON in cache
-    const toAnalyze = emails.filter(e => !cached[e.id]);
+    // Analizza solo le email NON in cache, le più recenti per prime (Gmail le
+    // restituisce già in quest'ordine), fino al limite per richiesta
+    const notCached = emails.filter(e => !cached[e.id]);
+    const toAnalyze = notCached.slice(0, MAX_NEW_PER_RUN);
+    const pendingIds = new Set(notCached.slice(MAX_NEW_PER_RUN).map(e => e.id));
+    const context = toAnalyze.length ? await occupiedContext() : {};
     const newlyAnalyzed = await Promise.allSettled(
-      toAnalyze.map(email => analyzeAndRespond(email, apiKey))
+      toAnalyze.map(email => analyzeAndRespond(email, apiKey, context))
     );
 
     const newResults = {};
@@ -191,7 +213,7 @@ export default async function handler(req, res) {
     }
 
     // Combina: email con dettagli freschi da Gmail + categoria/risposte da cache o nuove
-    const analyzedEmails = emails.map(email => {
+    const analyzedEmails = emails.filter(email => !pendingIds.has(email.id)).map(email => {
       const analysis = cached[email.id] || newResults[email.id];
       return { ...email, ...analysis };
     });
@@ -205,6 +227,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       byCategory,
       totalEmails: analyzedEmails.length,
+      pendingAnalysis: pendingIds.size,
       fromCache: Object.keys(cached).length,
       newlyAnalyzed: toAnalyze.length,
       cacheEnabled: hasCache,
